@@ -2,7 +2,7 @@
 # Windows has no `make` by default — make.cmd mirrors these targets.
 # Keep the two in sync; tests/unit/test_task_runner.py enforces it.
 
-.PHONY: help dev down test test-unit test-integration test-latency test-contract lint fmt eval ingest prerender demo
+.PHONY: help dev down vendor test test-unit test-integration test-latency test-contract lint fmt eval ingest prerender demo
 
 help:
 	@echo "dev              start Postgres + Redis"
@@ -17,6 +17,7 @@ help:
 	@echo "eval             model and voice comparison"
 	@echo "ingest           rebuild knowledge index"
 	@echo "prerender        regenerate fixed audio assets"
+	@echo "vendor           re-download the LiveKit browser client"
 	@echo "demo             run the agent worker"
 
 dev:
@@ -57,6 +58,9 @@ eval:
 
 ingest:
 	uv run python -m agent.knowledge.ingest
+
+vendor:
+	uv run python scripts/vendor_livekit.py
 
 prerender:
 	uv run python -m agent.tools.prerender

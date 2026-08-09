@@ -28,12 +28,15 @@ async def test_async_test_runner_works() -> None:
 def test_all_packages_have_init(project_root: Path) -> None:
     """A missing __init__.py fails only on some import paths — catch it here."""
     root = project_root / "src" / "agent"
+    static = root / "api" / "static"
     missing = [
         str(d.relative_to(project_root))
         for d in root.rglob("*")
         if d.is_dir()
         and not d.name.startswith(("_", "."))
-        and d.name != "static"  # static assets, not a Python package
+        # Web assets, not Python packages. Excludes the vendored JS beneath it.
+        and static not in d.parents
+        and d != static
         and not (d / "__init__.py").exists()
     ]
     assert not missing, f"missing __init__.py in: {missing}"

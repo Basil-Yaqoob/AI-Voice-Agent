@@ -99,6 +99,45 @@ Other verified numbers: LiveKit agent session $0.01/min, SIP $0.003–0.004/min.
 
 ---
 
+## ⚠️ Deferred with client sign-off — must be done before production
+
+### Endpointing is unvalidated against real speech
+
+**Status:** deliberately deferred 10 Aug 2026. No recorded Pakistani call audio
+exists yet; the client relationship is not confirmed, so collecting it was not
+worth the effort. **This is a known gap, not an oversight.**
+
+`AdaptiveEndpointer` (TASK-09) passes its unit tests, and its Urdu rules —
+verb-final clauses cut early, trailing conjunctions wait — are linguistically
+sound. But **the cut-off rate has never been measured against a real caller.**
+That number decides whether the agent feels rude, and it is the single most
+likely reason a demo lands badly despite good latency figures.
+
+**What is still required, before real traffic:**
+
+1. **30–50 labelled utterances, recorded over an actual phone line.** Not a
+   laptop microphone: codec compression and packet loss change VAD behaviour
+   materially, and thresholds tuned on clean audio do not transfer.
+2. Coverage must include mid-sentence hesitation, pauses before numbers
+   ("میرا آرڈر نمبر ہے... چار چار سات ایک"), fast speakers, speakerphone and
+   street noise, and trailing fillers (`اممم`, `اچھا`).
+3. Each clip labelled with the true end-of-speech timestamp.
+4. Run `eval/endpointing_eval.py` (to be written with the corpus) and record a
+   **baseline before tuning** — without it, threshold changes become
+   superstition.
+5. Acceptance targets from TASK-09: **cut-off rate below 3%**, median added
+   latency at or under 180ms.
+
+**Also still missing:** `tests/fixtures/audio/` is empty. The eight golden audio
+fixtures described in `02-TESTING-STRATEGY.md` — especially
+`long_pause_mid.wav`, the most valuable file in the set — depend on the same
+recording session.
+
+Until this is done, treat the 180ms endpointing slice of the latency budget as
+an estimate rather than a measurement.
+
+---
+
 ## Open items — not resolved, need action
 
 | Item | Owner | Notes |

@@ -20,6 +20,7 @@ if /i "%TARGET%"=="fmt"              goto fmt
 if /i "%TARGET%"=="eval"             goto eval
 if /i "%TARGET%"=="ingest"           goto ingest
 if /i "%TARGET%"=="prerender"        goto prerender
+if /i "%TARGET%"=="vendor"           goto vendor
 if /i "%TARGET%"=="demo"             goto demo
 goto unknown
 
@@ -36,6 +37,7 @@ echo fmt              format and autofix
 echo eval             model and voice comparison
 echo ingest           rebuild knowledge index
 echo prerender        regenerate fixed audio assets
+echo vendor           re-download the LiveKit browser client
 echo demo             run the agent worker
 goto :eof
 
@@ -87,6 +89,10 @@ goto :eof
 
 :ingest
 uv run python -m agent.knowledge.ingest || exit /b 1
+goto :eof
+
+:vendor
+uv run python scripts/vendor_livekit.py || exit /b 1
 goto :eof
 
 :prerender

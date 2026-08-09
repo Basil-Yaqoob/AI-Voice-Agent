@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>اردو Voice Agent — Live Demo</title>
+<style>
+  :root{
+    --bg:#f5f6f3; --surface:#fff; --ink:#14211e; --muted:#5c6b66; --line:#d3dbd6;
+    --primary:#0e5c4a; --accent:#a85f0e; --ok:#2c6e52; --bad:#9c3123;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{--bg:#0c1412; --surface:#131e1b; --ink:#e4ebe7; --muted:#90a59d; --line:#2a3a35;
+          --primary:#55c4a0; --accent:#dfa043; --ok:#5fcb9b; --bad:#e07e6c;}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}
+  .wrap{max-width:46rem;margin:0 auto;padding:2rem 1.25rem;
+        display:flex;flex-direction:column;gap:1.5rem}
+  h1{font:600 1.7rem/1.2 Georgia,serif;margin:0}
+  .sub{color:var(--muted);margin:0}
+
+  .panel{background:var(--surface);border:1px solid var(--line);padding:1.1rem 1.2rem}
+  .row{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
+
+  button{background:var(--primary);color:var(--surface);border:0;border-radius:3px;
+         padding:.75rem 1.5rem;font:600 1rem system-ui;cursor:pointer}
+  button[disabled]{opacity:.45;cursor:not-allowed}
+  button.stop{background:var(--bad)}
+
+  .state{font:600 .72rem ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;
+         color:var(--muted)}
+  .dot{display:inline-block;width:.55rem;height:.55rem;border-radius:50%;
+       background:var(--muted);margin-right:.4rem;vertical-align:middle}
+  .dot.live{background:var(--ok)}
+  .dot.err{background:var(--bad)}
+
+  #transcript{display:flex;flex-direction:column;gap:.65rem;min-height:9rem;
+              max-height:22rem;overflow-y:auto}
+  .msg{padding:.5rem .75rem;border-radius:3px;max-width:85%}
+  .msg.you{align-self:flex-start;background:var(--bg);border:1px solid var(--line)}
+  .msg.agent{align-self:flex-end;background:var(--primary);color:var(--surface)}
+  .who{font:600 .65rem ui-monospace;letter-spacing:.09em;text-transform:uppercase;
+       opacity:.75;display:block;margin-bottom:.15rem}
+  .urdu{font-family:"Noto Nastaliq Urdu","Jameel Noori Nastaleeq","Urdu Typesetting",serif;
+        direction:rtl;text-align:right;font-size:1.08rem;line-height:2.05}
+
+  .metric{display:flex;align-items:baseline;gap:.5rem}
+  .big{font:700 2rem ui-monospace,monospace;font-variant-numeric:tabular-nums}
+  .big.good{color:var(--ok)} .big.over{color:var(--bad)}
+  .breakdown{font:.78rem ui-monospace,monospace;color:var(--muted)}
+
+  label{font-size:.85rem;color:var(--muted)}
+  select{background:var(--bg);color:var(--ink);border:1px solid var(--line);
+         border-radius:3px;padding:.4rem .5rem;font:inherit;font-size:.9rem}
+  .note{font-size:.82rem;color:var(--muted);margin:0}
+  .error{color:var(--bad);font-size:.88rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1><span class="urdu">اردو</span> Voice Agent</h1>
+    <p class="sub">Live demo — browser to agent, no telephony.</p>
+  </header>
+
+  <div class="panel">
+    <div class="row">
+      <button id="connect">Connect</button>
+      <span class="state"><span class="dot" id="dot"></span><span id="state">idle</span></span>
+      <span style="flex:1"></span>
+      <label for="voice">Voice</label>
+      <select id="voice">
+        <option value="ur-PK-UzmaNeural">Uzma (female)</option>
+        <option value="ur-PK-AsadNeural">Asad (male)</option>
+      </select>
+    </div>
+    <p class="error" id="error" hidden></p>
+  </div>
+
+  <div class="panel">
+    <div class="metric">
+      <span class="big" id="latency">—</span>
+      <span class="sub">ms to first audio</span>
+    </div>
+    <div class="breakdown" id="breakdown">waiting for a turn</div>
+  </div>
+
+  <div class="panel">
+    <div id="transcript">
+      <p class="note" id="placeholder">Connect and speak in Urdu. The transcript shows what the
+      agent heard, so you can see the code-switching working.</p>
+    </div>
+  </div>
+
+  <p class="note">Budget is 800&nbsp;ms from the end of your sentence to the first syllable back.
+     Interrupt the agent mid-reply — it should stop immediately.</p>
+</div>
+
+<script src="/static/vendor/livekit-client.umd.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
