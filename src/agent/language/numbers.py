@@ -9,8 +9,13 @@ Two rules govern this module and both matter:
 2. **South Asian grouping.** 100,000 is ``ایک لاکھ``, not "one hundred thousand".
    A Pakistani caller hearing the Western form registers it as foreign.
 
-⚠️ The table below needs native-speaker sign-off before it is trusted in front
-of a customer. See ``tests/fixtures/golden/urdu_normalization.yaml``.
+Reviewed by a native speaker on 9 August 2026 (Basil). 94/100 entries matched an
+independent reference beforehand; of the six contested spellings, five were
+confirmed and 75 was changed to ``پچھتر``.
+
+⚠️ **64 is still unresolved.** The reviewer rejected both ``چونسٹھ`` and
+``چوسٹھ``. The current value is a placeholder awaiting a correct form — see
+``contested_numerals`` in ``tests/fixtures/golden/urdu_normalization.yaml``.
 """
 
 from __future__ import annotations
@@ -94,7 +99,7 @@ _UNITS: dict[int, str] = {
     72: "بہتر",
     73: "تہتر",
     74: "چوہتر",
-    75: "پچہتر",
+    75: "پچھتر",  # native review 9 Aug 2026: chosen over پچہتر
     76: "چھہتر",
     77: "ستتر",
     78: "اٹھہتر",

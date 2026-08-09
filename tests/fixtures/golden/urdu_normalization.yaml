@@ -18,36 +18,62 @@
 #   https://claude.ai/code/artifact/51bd8b30-5134-4ce3-b374-808fedb8bcc6
 #   (regenerate with: uv run python eval/make_review_sheet.py)
 #
-# reviewed_by:   (name)
-# reviewed_date: (yyyy-mm-dd)
-reviewed_by: null
-reviewed_date: null
+reviewed_by: Basil
+reviewed_date: 2026-08-09
 
-# The 0-99 table was diffed against an independent reference on 9 Aug 2026:
-# 94/100 agreed. These six differ, and both spellings are attested. A native
-# speaker picks; until then the "ours" column is what numbers.py produces.
-#
-# This is a real decision, not a typo hunt: 51, 91 and 92 all appear in
-# everyday amounts.
+# Reviewed by ear against Azure ur-PK audio, not by reading. 22 of 24 cases
+# approved. The two rejections are recorded under `open_issues` below and are
+# tracked as real defects, not as review noise.
+
+# The 0-99 table was diffed against an independent reference first: 94/100
+# agreed. Six spellings were contested; the reviewer resolved five.
 contested_numerals:
   - n: 51
     ours: اکاون
     alternative: اکیاون
+    resolution: kept        # اکاون confirmed
   - n: 64
     ours: چونسٹھ
     alternative: چوسٹھ
+    resolution: UNRESOLVED  # reviewer rejected BOTH; correct form still needed
   - n: 68
     ours: اڑسٹھ
     alternative: اٹھسٹھ
+    resolution: kept
   - n: 75
-    ours: پچہتر
-    alternative: پچھتر
+    ours: پچھتر
+    alternative: پچہتر
+    resolution: changed     # was پچہتر, reviewer chose پچھتر
   - n: 91
     ours: اکانوے
     alternative: اکیانوے
+    resolution: kept
   - n: 92
     ours: بانوے
     alternative: بیانوے
+    resolution: kept
+
+# Rejected in review. Both stay here until fixed and re-reviewed.
+open_issues:
+  - case: g14
+    input: "1.5"
+    produced: ڈیڑھ
+    verdict: rejected
+    detail: null            # reviewer gave no note; needs the correct wording
+    status: awaiting detail
+
+  - case: g22
+    input: آپ کا order کل آئے گا
+    produced: آپ کا order کل آئے گا
+    verdict: rejected
+    detail: "order pronunciation is not correct"
+    status: not a normaliser bug
+    analysis: >
+      The text is right - "order" is preserved in Latin exactly as the
+      code-switching design intends. What is wrong is that the Azure ur-PK
+      voice mispronounces the English word. This is a TTS-layer defect and it
+      matters: the entire product premise is Urdu speech with English nouns
+      left in English. Tracked against TASK-05/TASK-08, not TASK-06.
 
 cases:
   # ── plain integers ────────────────────────────────────────────────────
