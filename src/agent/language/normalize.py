@@ -16,51 +16,15 @@ import re
 from collections.abc import Callable, Iterable
 
 from agent.language.numbers import ORDINALS, digit_by_digit, number_to_urdu
+from agent.language.translit import ENGLISH_TO_URDU
 
 __all__ = ["ENGLISH_KEEP", "normalize_for_tts"]
 
-# English tokens deliberately left in English. Kept aligned with the Deepgram
-# keyterm list — they describe the same vocabulary and must not drift apart.
-ENGLISH_KEEP = frozenset(
-    {
-        "order",
-        "delivery",
-        "deliver",
-        "tracking",
-        "track",
-        "account",
-        "balance",
-        "package",
-        "complaint",
-        "refund",
-        "invoice",
-        "courier",
-        "payment",
-        "receipt",
-        "address",
-        "booking",
-        "cancel",
-        "confirm",
-        "status",
-        "internet",
-        "data",
-        "bundle",
-        "recharge",
-        "bill",
-        "premium",
-        "plan",
-        "basic",
-        "check",
-        "update",
-        "email",
-        "app",
-        "online",
-        "customer",
-        "care",
-        "service",
-        "number",
-    }
-)
+# The English vocabulary the pipeline handles deliberately: shielded from the
+# number rules, then spoken in Urdu script. Derived from the transliteration
+# lexicon so the two cannot drift apart — a word protected here but missing
+# from the lexicon would be read aloud in a mispronounced Latin form.
+ENGLISH_KEEP = frozenset(ENGLISH_TO_URDU)
 
 _MONTHS: dict[int, str] = {
     1: "جنوری",
@@ -300,8 +264,13 @@ def _normalize(text: str, preserve: frozenset[str]) -> str:
     for pattern, handler in _RULES:
         text = pattern.sub(handler, text)
 
+    # Restore as Urdu script, not Latin. Native review 9 Aug 2026: the ur-PK
+    # voice mispronounces Latin-script English, and writing the word the way an
+    # Urdu speaker writes it gives a natural Pakistani pronunciation. Only the
+    # TTS input is rewritten — history and transcripts keep the Latin form.
     for index, word in enumerate(protected):
-        text = text.replace(_placeholder(index), word)
+        spoken = ENGLISH_TO_URDU.get(word.casefold(), word)
+        text = text.replace(_placeholder(index), spoken)
 
     return re.sub(r"[ \t]{2,}", " ", text).strip()
 

@@ -16,8 +16,9 @@ import yaml
 from hypothesis import given
 from hypothesis import strategies as st
 
-from agent.language.normalize import normalize_for_tts
+from agent.language.normalize import ENGLISH_KEEP, normalize_for_tts
 from agent.language.numbers import digit_by_digit, number_to_urdu
+from agent.language.translit import ENGLISH_TO_URDU, unmapped_words
 
 
 def _has_ascii_digit(text: str) -> bool:
@@ -230,24 +231,57 @@ def test_idiomatic_halves(raw: str, expected: str) -> None:
 # ── preserving deliberate English ───────────────────────────────────────────
 
 
-def test_english_preserved_in_latin_script() -> None:
-    assert "order" in normalize_for_tts("آپ کا order کل آئے گا")
+def test_english_spoken_in_urdu_script() -> None:
+    """The g22 defect. The ur-PK voice mispronounces Latin-script English, so
+    the TTS input carries the Urdu-script form instead."""
+    out = normalize_for_tts("آپ کا order کل آئے گا")
+    assert "آرڈر" in out
+    assert "order" not in out
 
 
-def test_multiword_english_preserved() -> None:
+def test_multiword_english_each_token_transliterated() -> None:
     out = normalize_for_tts("آپ کا Premium Plan فعال ہے")
-    assert "Premium" in out and "Plan" in out
+    assert "پریمیم" in out and "پلان" in out
+    assert "Premium" not in out
+
+
+def test_transliteration_is_case_insensitive() -> None:
+    for written in ("order", "Order", "ORDER"):
+        assert "آرڈر" in normalize_for_tts(f"آپ کا {written} کل آئے گا")
 
 
 def test_english_and_number_together() -> None:
     out = normalize_for_tts("آپ کا balance 2500 روپے ہے")
-    assert "balance" in out
+    assert "بیلنس" in out
     assert not _has_ascii_digit(out)
 
 
-def test_unlisted_english_is_left_alone() -> None:
-    """The normaliser converts numbers; it is not a translator."""
+def test_unmapped_english_left_in_latin() -> None:
+    """A wrong guess at the spelling would be worse than a mispronunciation,
+    and much harder to notice. Gaps are surfaced by unmapped_words()."""
     assert "Wednesday" in normalize_for_tts("Wednesday کو")
+
+
+def test_unmapped_words_reports_gaps() -> None:
+    gaps = unmapped_words("آپ کا order Wednesday کو dispatch ہوگا")
+    assert "Wednesday" in gaps and "dispatch" in gaps
+    assert "order" not in gaps
+
+
+def test_every_protected_word_has_a_transliteration() -> None:
+    """A word shielded from the number rules but missing from the lexicon would
+    be read aloud in the mispronounced Latin form - the exact g22 defect."""
+    missing = sorted(w for w in ENGLISH_KEEP if w not in ENGLISH_TO_URDU)
+    assert not missing, f"protected but not transliterated: {missing}"
+
+
+def test_transliterations_are_urdu_script() -> None:
+    bad = [
+        f"{en} -> {ur}"
+        for en, ur in ENGLISH_TO_URDU.items()
+        if not any("؀" <= ch <= "ۿ" for ch in ur)
+    ]
+    assert not bad, f"lexicon entries not in Urdu script: {bad}"
 
 
 # ── markdown ────────────────────────────────────────────────────────────────

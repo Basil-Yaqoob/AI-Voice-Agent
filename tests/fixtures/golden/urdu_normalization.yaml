@@ -153,9 +153,19 @@ cases:
     note: quarter to nine at night
 
   # ── code-switching ─────────────────────────────────────────────────────
+  # Revised after the g22 review: English nouns are spoken in Urdu script.
+  # The ur-PK voice mispronounces Latin-script English; writing the word the
+  # way an Urdu speaker writes it gives a natural Pakistani pronunciation.
+  # This is the TTS input only - history and transcripts keep the Latin form.
   - input: "آپ کا order کل آئے گا"
-    expected: "آپ کا order کل آئے گا"
-    note: English noun preserved in Latin script, untouched
+    expected: "آپ کا آرڈر کل آئے گا"
+    note: order -> آرڈر for correct pronunciation (was the g22 defect)
   - input: "آپ کا balance 2500 روپے ہے"
-    expected: "آپ کا balance دو ہزار پانچ سو روپے ہے"
-    note: English preserved, number converted
+    expected: "آپ کا بیلنس دو ہزار پانچ سو روپے ہے"
+    note: English transliterated, number converted
+  - input: "میں tracking check کر کے بتاتا ہوں"
+    expected: "میں ٹریکنگ چیک کر کے بتاتا ہوں"
+    note: two English verbs in one Urdu clause
+  - input: "Premium Plan میں unlimited data ہے"
+    expected: "پریمیم پلان میں ان لمیٹڈ ڈیٹا ہے"
+    note: multi-word product name, each token transliterated
