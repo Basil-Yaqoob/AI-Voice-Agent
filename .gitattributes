@@ -1,0 +1,14 @@
+* text=auto eol=lf
+
+# cmd.exe mis-parses LF-only batch files: stray "not recognized as an internal
+# or external command" errors on every invocation. Force CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Makefiles require tabs and LF.
+Makefile text eol=lf
+
+# Binary
+*.wav binary
+*.png binary
+*.jsonl -text

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Write-Output \"--- python ---\"; \\(Get-Command python -ErrorAction SilentlyContinue\\).Source; python --version 2>&1; Write-Output \"--- uv ---\"; \\(Get-Command uv -ErrorAction SilentlyContinue\\).Source; Write-Output \"--- docker ---\"; \\(Get-Command docker -ErrorAction SilentlyContinue\\).Source; Write-Output \"--- git ---\"; \\(Get-Command git -ErrorAction SilentlyContinue\\).Source; Write-Output \"--- make ---\"; \\(Get-Command make -ErrorAction SilentlyContinue\\).Source)"
+    ]
+  }
+}

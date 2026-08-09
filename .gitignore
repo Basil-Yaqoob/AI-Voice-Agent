@@ -1,0 +1,14 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.wav.tmp
+eval/out/
+
+# Session transcript copy is large; keep the memory note, drop the raw log.
+.claude/session-transcript-*.jsonl

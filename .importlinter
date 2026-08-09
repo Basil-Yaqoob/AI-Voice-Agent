@@ -1,0 +1,27 @@
+[importlinter]
+root_packages =
+    agent
+include_external_packages = True
+
+[importlinter:contract:providers-are-isolated]
+name = Vendor SDKs may only be imported inside their own adapter
+type = forbidden
+source_modules =
+    agent.pipeline
+    agent.language
+    agent.knowledge
+    agent.interfaces
+    agent.telemetry
+forbidden_modules =
+    anthropic
+    deepgram
+    azure
+
+[importlinter:contract:interfaces-are-pure]
+name = Interfaces must not depend on implementations
+type = forbidden
+source_modules =
+    agent.interfaces
+forbidden_modules =
+    agent.providers
+    agent.pipeline
