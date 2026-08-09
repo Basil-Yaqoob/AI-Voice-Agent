@@ -29,8 +29,19 @@ from collections.abc import Mapping
 
 __all__ = ["ENGLISH_TO_URDU", "transliterate_for_speech", "unmapped_words"]
 
-# ⚠️ Needs the same native-speaker review the numeral table got.
+# Reviewed by ear, 9 Aug 2026 (Basil): 48 of 50 entries approved.
 # Regenerate the listening sheet with: uv run python eval/make_translit_sheet.py
+#
+# ⚠️ Five words are NOT settled and are pending round 4:
+#   track, paid  - rejected outright
+#   app, call, data - accepted, but the reviewer wants English pronunciation
+#
+# These are a different problem from a wrong spelling. The reviewer wants the
+# English *sound*, which transliteration cannot give by definition. Measured
+# 10 Aug 2026: an SSML <lang xml:lang="en-US"> switch inside the ur-PK voice
+# does change the audio, so it is achievable without changing voice — see
+# ENGLISH_PRONUNCIATION below, currently unused pending the round-4 verdict.
+ENGLISH_PRONUNCIATION: frozenset[str] = frozenset()
 ENGLISH_TO_URDU: dict[str, str] = {
     # ── order and delivery ────────────────────────────────────────────
     "order": "آرڈر",

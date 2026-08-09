@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mixed-language speech</title>
+<style>
+  :root{--bg:#f5f6f3;--surface:#fff;--ink:#14211e;--muted:#5c6b66;--line:#d3dbd6;
+        --primary:#0e5c4a;--accent:#a85f0e}
+  @media(prefers-color-scheme:dark){:root{--bg:#0c1412;--surface:#131e1b;--ink:#e4ebe7;
+        --muted:#90a59d;--line:#2a3a35;--primary:#55c4a0;--accent:#dfa043}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,sans-serif}
+  .wrap{max-width:60rem;margin:0 auto;padding:2rem 1.25rem;display:flex;flex-direction:column;gap:1.75rem}
+  h1{font:600 1.8rem/1.2 Georgia,serif;margin:0}
+  h2{font:600 1.2rem/1.2 Georgia,serif;margin:0 0 .6rem;padding-bottom:.45rem;border-bottom:2px solid var(--ink)}
+  .lede{color:var(--muted);max-width:50ch;margin:0}
+  .box{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);
+       padding:1rem 1.1rem;max-width:58ch}
+  table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);font-size:.9rem}
+  th{background:var(--bg);text-align:left;padding:.5rem .7rem;font:600 .7rem/1.4 ui-monospace,monospace;
+     letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line)}
+  td{padding:.7rem .7rem;border-bottom:1px solid var(--line);vertical-align:top}
+  .urdu{font-family:'Noto Nastaliq Urdu','Jameel Noori Nastaleeq',serif;direction:rtl;
+        font-size:1.08rem;line-height:2}
+  .num{font-family:ui-monospace,monospace;font-weight:600;direction:ltr}
+  .mini{font:400 .72rem/1.4 system-ui,sans-serif;color:var(--muted);direction:ltr;margin-top:.2rem}
+  label{display:block;font-size:.82rem;cursor:pointer}
+  audio{width:12rem;height:2rem;margin-top:.25rem}
+  button{background:var(--primary);color:var(--surface);border:0;padding:.6rem 1.1rem;
+         border-radius:3px;font:600 .9rem system-ui;cursor:pointer}
+  #out{width:100%;min-height:8rem;margin-top:1rem;font-family:ui-monospace,monospace;font-size:.8rem;
+       padding:.7rem;border:1px solid var(--line);background:var(--surface);color:var(--ink);display:none}
+  .scroll{overflow-x:auto}
+</style></head><body><div class="wrap">
+
+<header>
+  <p style="font:600 .7rem ui-monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 .5rem">
+    Round 4 &middot; mixed-language speech</p>
+  <h1>Two questions, five minutes</h1>
+  <p class="lede">You approved 48 of 50 words. The five below you wanted in English &mdash;
+     and it turns out that is possible. The second question is bigger.</p>
+</header>
+
+<section>
+  <h2>1. The five English-pronunciation words</h2>
+  <div class="box" style="margin-bottom:.9rem">
+    <strong>The SSML language switch does work.</strong>
+    <p style="margin:.5rem 0 0">I assumed earlier it might be ignored by a monolingual voice.
+    It is not &mdash; the same Urdu voice can be told to say one word in English. So you can have
+    both: Urdu-accented for most words, real English for these.</p>
+  </div>
+  <div class="scroll"><table>
+    <thead><tr><th>Word</th><th>Urdu script</th><th>English switch</th><th>Which</th></tr></thead>
+    <tbody>{{ROWS}}</tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>2. Should the whole agent change voice?</h2>
+  <div class="box" style="margin-bottom:.9rem">
+    <strong>This is the bigger decision.</strong>
+    <p style="margin:.5rem 0 0">Left is today: a Pakistani <em>{{URPK}}</em> voice with English
+    words rewritten in Urdu script. Right is a multilingual voice (<em>{{MULTI}}</em>) reading the
+    same sentence with English left as English &mdash; it speaks both natively, so no
+    transliteration is needed at all.</p>
+    <p style="margin:.5rem 0 0">The trade is accent. The multilingual voice is not Pakistani.
+    Judge whether it still sounds like someone your customers would trust on the phone.</p>
+  </div>
+  <div class="scroll"><table>
+    <thead><tr><th>Sentence</th><th>Current: ur-PK</th><th>Multilingual</th><th>Which</th></tr></thead>
+    <tbody>{{VOICES}}</tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>Send back</h2>
+  <p><button onclick="collect()">Generate results</button></p>
+  <textarea id="out" readonly></textarea>
+</section>
+
+</div>
+<script>
+function collect(){
+  const lines=[];
+  document.querySelectorAll('input[type=radio]:checked').forEach(r=>lines.push(r.name+": "+r.value));
+  const out=document.getElementById('out');
+  out.style.display='block';
+  out.value=lines.length?lines.join("\n"):"nothing selected";
+  out.select();
+}
+</script></body></html>
