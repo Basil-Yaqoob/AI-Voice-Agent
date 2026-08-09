@@ -8,8 +8,9 @@ than beside any one test module.
 
 from __future__ import annotations
 
+from tests.fakes.audio import FakeSink
 from tests.fakes.llm import FakeLLM, LLMCall
 from tests.fakes.stt import FakeSTT
 from tests.fakes.tts import FakeTTS
 
-__all__ = ["FakeLLM", "FakeSTT", "FakeTTS", "LLMCall"]
+__all__ = ["FakeLLM", "FakeSTT", "FakeSink", "FakeTTS", "LLMCall"]
