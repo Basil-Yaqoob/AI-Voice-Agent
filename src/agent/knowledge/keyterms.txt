@@ -1,0 +1,49 @@
+# Deepgram Nova-3 keyterm prompting (TASK-04).
+#
+# The cheapest accuracy win available. Without these, English nouns inside an
+# Urdu sentence get mangled - and those are exactly the words the intent hangs
+# on ("order", "tracking", a plan name).
+#
+# Two rules learned the hard way:
+#   1. Keep the list to 40-60 high-value terms. An over-broad list biases the
+#      model toward these words even when they were not said.
+#   2. List what callers actually say, not what the brochure calls it. If nobody
+#      says "subscription tier", leave it out.
+#
+# Lines starting with # and blank lines are ignored.
+
+# ── Product and brand names (highest value) ──────────────────────────
+Acme
+Acme Pay
+Premium Plan
+Basic Plan
+Unlimited Package
+
+# ── Everyday English nouns Pakistani callers use inside Urdu ─────────
+order
+delivery
+deliver
+tracking
+track
+account
+balance
+package
+complaint
+refund
+invoice
+courier
+payment
+receipt
+address
+booking
+cancel
+confirm
+status
+number
+internet
+data
+bundle
+recharge
+bill
+customer care
+helpline

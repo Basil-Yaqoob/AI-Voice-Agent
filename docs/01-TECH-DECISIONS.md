@@ -156,6 +156,42 @@ Full strategy in `02-TESTING-STRATEGY.md`.
 
 ---
 
+## DECISION 9 — OpenRouter adapter uses the `openai` SDK; both LLM paths are built
+
+*Recorded during TASK-03 implementation, 9 Aug 2026.*
+
+**Chosen:** add `openai` as a dependency and ship two adapters — `llm_claude.py` (Anthropic SDK, direct) and `llm_openrouter.py` (OpenAI SDK, proxied).
+**Rejected:** raw `httpx` for OpenRouter; building only one adapter.
+
+OpenRouter speaks the OpenAI chat-completions protocol, so the Anthropic client cannot be reused. Hand-rolling SSE parsing, tool-call fragment accumulation and cancellation over raw `httpx` is exactly the class of bug that costs a day, and those mechanics are the substance of TASK-03. Both adapters exist so TASK-12 can benchmark proxied against direct rather than assuming.
+
+Three OpenRouter-specific behaviours are absorbed in the adapter and in `Settings.resolved_llm_model`:
+
+- Fast mode is a **separate model id** (`anthropic/claude-opus-5-fast`), not a `speed` parameter.
+- Prompt caching needs `cache_control` inside a **multipart** system message.
+- Streaming usage only appears if `stream_options.include_usage` is set. Without it `cache_read_tokens` is permanently zero and the TASK-11 cache alarm misfires.
+
+### Measured, 9 Aug 2026 — from a Karachi dev machine via OpenRouter
+
+TTFT to first **visible** token, 5,290-char cached prefix, three consecutive calls:
+
+| Model | TTFT | Cache reads (call 2+) |
+|---|---|---|
+| `claude-opus-5` | 4.4 – 5.4 s | 1675 ✅ |
+| `claude-sonnet-5` | 1.8 – 3.7 s | 1675 ✅ |
+| `claude-haiku-4.5` | 1.0 – 2.5 s | **0** ❌ |
+
+**Prompt caching works through OpenRouter** for Opus and Sonnet — confirmed, not assumed. Haiku 4.5 never cached: the prefix is 1,282 tokens on its tokenizer, below that model's cache minimum. A model switch can therefore silently disable caching, which is why `prefix_is_cacheable()` exists and why TASK-11's cache alarm matters.
+
+**Every model is far over the 300ms budget, and thinking is not the reason.** Disabling reasoning changed nothing (Haiku 1466ms off vs 986ms on — noise; Sonnet 2921 vs 2419). The cost is the network path: Pakistan → OpenRouter (US) → Anthropic → back, two intercontinental round trips plus an extra TLS handshake.
+
+These are **not** production numbers — production runs the worker in Mumbai/UAE calling the provider directly. But they establish two things now rather than in week six:
+
+1. **OpenRouter is a development convenience, not a production transport** for this workload. Keep `LLM_PROVIDER=openrouter` for building; benchmark `claude` from the deployment region before committing.
+2. TASK-12 must measure **from the region the agent will run in**. A benchmark from a dev laptop measures the laptop's ISP.
+
+---
+
 ## DECISION 8 — Task runner: Makefile plus a Windows `.cmd` shim
 
 *Recorded during TASK-01 implementation, 9 Aug 2026.*

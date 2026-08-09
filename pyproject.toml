@@ -18,6 +18,7 @@ dependencies = [
     "redis>=5.2",
     "structlog>=24.4",
     "prometheus-client>=0.21",
+    "openai>=2.53.0",
 ]
 
 [dependency-groups]
@@ -54,6 +55,17 @@ select = [
     "B",     # bugbear
     "UP",    # pyupgrade
     "RUF",
+]
+
+# RUF001 flags Urdu punctuation as "ambiguous" and suggests ASCII replacements.
+# Taking that advice would be a product bug, not a style fix: U+06D4 is what the
+# sentence chunker splits on, and swapping it for "." or "-" silently stops
+# streaming TTS from ever firing on Urdu text. These characters are deliberate.
+allowed-confusables = [
+    "۔", # U+06D4 ARABIC FULL STOP     - sentence boundary for the chunker
+    "،", # U+060C ARABIC COMMA
+    "؟", # U+061F ARABIC QUESTION MARK - also a chunker boundary
+    "؛", # U+061B ARABIC SEMICOLON
 ]
 
 [tool.ruff.lint.per-file-ignores]
