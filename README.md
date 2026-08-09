@@ -25,6 +25,36 @@ Production conversational AI for Pakistani customers — code-switched Urdu/Engl
 
 ---
 
+## Status — 10 August 2026
+
+All thirteen tasks implemented. **475 tests passing, lint clean** (ruff, mypy
+strict, import-linter).
+
+| Verified against live vendors | Result |
+|---|---|
+| Urdu survives Azure → Deepgram roundtrip | ✅ intact |
+| Both `ur-PK` voices | ✅ Uzma, Asad |
+| Azure TTS time-to-first-byte | 668 ms from Karachi |
+| Prompt caching through OpenRouter | ✅ Opus/Sonnet; ✗ Haiku (below its cache minimum) |
+| Urdu numerals reviewed by a native speaker | ✅ 94/100 pre-verified, 6 resolved |
+| Transliteration lexicon reviewed | ✅ 48/50, 5 switched to English pronunciation |
+
+| Measured in the pipeline | Result | Budget |
+|---|---:|---:|
+| Time to first audio | 394 ms | 800 ms |
+| Retrieval on the critical path | 0 ms | — |
+| Barge-in to silence | <1 ms | 100 ms |
+
+**Two things are deliberately outstanding.** Both are recorded in
+[HANDOFF.md](HANDOFF.md):
+
+1. **Endpointing is unvalidated against real speech** — deferred with client
+   sign-off; needs a phone-line recording session before production.
+2. **Carrier contracting has not started** — the longest lead time in the
+   project, and not something engineering can accelerate.
+
+---
+
 ## Task board
 
 Build order. Dependencies are listed in each file's header.

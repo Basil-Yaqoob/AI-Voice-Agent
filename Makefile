@@ -57,7 +57,7 @@ eval:
 	uv run python eval/run_eval.py
 
 ingest:
-	uv run python -m agent.knowledge.ingest
+	uv run python scripts/ingest.py
 
 vendor:
 	uv run python scripts/vendor_livekit.py

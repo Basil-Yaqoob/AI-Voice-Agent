@@ -106,6 +106,20 @@ class TurnMetrics:
         finally:
             self.stages[name] = (time.perf_counter() - started) * 1000
 
+    def usage_from(self, usage: object) -> None:
+        """Copy token counts off an LLM ``Usage``.
+
+        Duck-typed so telemetry does not import the LLM interface, which would
+        make the metrics module part of the provider dependency graph.
+        """
+        for field_name in (
+            "input_tokens",
+            "output_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
+        ):
+            setattr(self, field_name, getattr(usage, field_name, 0) or 0)
+
     def as_log(self) -> dict[str, object]:
         """One structured line per turn.
 

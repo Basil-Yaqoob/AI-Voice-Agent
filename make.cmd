@@ -88,7 +88,7 @@ uv run python eval/run_eval.py || exit /b 1
 goto :eof
 
 :ingest
-uv run python -m agent.knowledge.ingest || exit /b 1
+uv run python scripts/ingest.py || exit /b 1
 goto :eof
 
 :vendor
