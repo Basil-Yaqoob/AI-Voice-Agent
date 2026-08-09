@@ -32,11 +32,14 @@ def test_sample_rate_declared() -> None:
 
 
 async def test_ttfb_delay_respected() -> None:
-    tts = FakeTTS(chunks=[b"a"], ttfb_ms=50)
+    """Tolerance accounts for the ~15.6ms Windows timer resolution, which lets
+    asyncio.sleep return measurably early."""
+    tts = FakeTTS(chunks=[b"a"], ttfb_ms=100)
     start = time.perf_counter()
     async for _ in tts.synthesize("سلام", voice="v"):
         break
-    assert (time.perf_counter() - start) * 1000 >= 45
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    assert elapsed_ms >= 80, f"configured 100ms TTFB but first chunk at {elapsed_ms:.0f}ms"
 
 
 async def test_cancellation_stops_synthesis() -> None:

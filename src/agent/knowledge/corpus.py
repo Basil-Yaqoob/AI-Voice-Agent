@@ -21,9 +21,11 @@ from agent.language.prompts import MIN_CACHEABLE_CHARS
 
 __all__ = ["CHARS_PER_TOKEN", "MAX_CACHED_CORPUS_TOKENS", "CorpusPlan", "plan_for_corpus"]
 
-# Rough English-dominant ratio. Urdu script tokenises denser, so this
-# *overestimates* the token count for Urdu text, which errs toward retrieval —
-# the safe direction, since an over-large prefix is a hard API failure.
+# Rough English-dominant ratio. Urdu script tokenises *denser* — more tokens per
+# character — so dividing by 4 UNDER-counts an Urdu corpus and errs toward
+# keeping an oversized prefix rather than toward retrieval. Measure the real
+# token count with the provider's tokenizer before relying on this near the
+# ceiling.
 CHARS_PER_TOKEN = 4
 
 # Above this the prefix bloats every request and slows time-to-first-token even

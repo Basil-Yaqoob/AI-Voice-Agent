@@ -113,6 +113,41 @@ async def test_resolve_survives_prefetch_failure() -> None:
         await p.resolve("میرا آرڈر کہاں ہے")
 
 
+async def test_resolve_propagates_turn_cancellation() -> None:
+    """Review regression: `except (TimeoutError, CancelledError, Exception)`
+    swallowed CancelledError, so a barge-in left the turn running and issued a
+    fresh search - breaking 'no search outlives the call'."""
+    store = FakeStore(delay_ms=500)
+    p = SpeculativePrefetcher(store, resolve_timeout_s=5.0)
+    p.on_partial("میرا آرڈر کہاں")
+    await asyncio.sleep(0.01)
+
+    task = asyncio.create_task(p.resolve("میرا آرڈر کہاں ہے"))
+    await asyncio.sleep(0.01)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    searches_at_cancel = len(store.queries)
+    await asyncio.sleep(0.05)
+    assert len(store.queries) == searches_at_cancel, "a search outlived the cancelled turn"
+
+
+async def test_failed_prefetch_exception_is_retrieved() -> None:
+    """Review regression: a failed speculative task was dropped without its
+    exception being read, producing 'Task exception was never retrieved' spam
+    for every partial during a database outage."""
+    store = FakeStore(fail_with=ConnectionError("db down"))
+    p = SpeculativePrefetcher(store)
+    p.on_partial("میرا آرڈر کہاں")
+    await asyncio.sleep(0.01)
+
+    p.on_partial("میرا آرڈر کہاں ہے بھائی")  # supersedes the failed task
+    await asyncio.sleep(0.01)
+    p.cancel()
+
+
 async def test_cancel_leaves_no_task_running() -> None:
     """No search may outlive the call that started it."""
     before = len(asyncio.all_tasks())

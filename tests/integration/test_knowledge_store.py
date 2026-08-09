@@ -139,6 +139,59 @@ async def test_keyword_boost_is_not_silently_zero(store: PgVectorStore) -> None:
     )
 
 
+async def test_hybrid_search_uses_the_hnsw_index(store: PgVectorStore) -> None:
+    """Review regression: a blended expression in ORDER BY is not a distance
+    operator, so Postgres cannot use HNSW and sequentially scanned every chunk.
+    The query is now retrieve-then-rerank, with the vector arm index-eligible."""
+    await store.upsert(CHUNKS)
+    vector = (await store._embedder.embed(["ڈیلیوری"], kind="query"))[0]
+
+    async with store._pool.acquire() as conn:
+        plan = "\n".join(
+            r["QUERY PLAN"]
+            for r in await conn.fetch(
+                "EXPLAIN SELECT id FROM chunks ORDER BY embedding <=> $1 LIMIT 20", vector
+            )
+        )
+    assert "chunks_embedding_idx" in plan, f"vector arm is not index-eligible; plan was:\n{plan}"
+
+
+async def test_capitalised_keywords_still_match(store: PgVectorStore) -> None:
+    """Review regression: query tokens were casefolded but keywords were stored
+    verbatim, so Postgres' case-sensitive INTERSECT silently killed the boost
+    for any capitalised keyword. All fixtures happened to be lowercase."""
+    await store.upsert(
+        [
+            Chunk(
+                id="cap",
+                text="Gold Bundle میں extra data ہے۔",
+                source="products",
+                keywords=["Gold Bundle", "GOLD", "Bundle"],
+            )
+        ]
+    )
+    hits = await store.search("Gold Bundle کیا ہے", k=3)
+    assert hits[0].chunk.id == "cap"
+
+
+async def test_connect_bootstraps_a_fresh_database() -> None:
+    """Review regression: register_vector ran as pool init before the extension
+    existed, so connect() failed with 'unknown type: public.vector' on an
+    empty database - i.e. it could never bootstrap one."""
+    conn = await asyncpg.connect(DSN)
+    try:
+        await conn.execute("DROP TABLE IF EXISTS chunks")
+        await conn.execute("DROP EXTENSION IF EXISTS vector CASCADE")
+    finally:
+        await conn.close()
+
+    fresh = await PgVectorStore.connect(DSN, HashEmbedder(dimensions=1024))
+    try:
+        assert await fresh.count() == 0
+    finally:
+        await fresh.close()
+
+
 async def test_search_respects_k(store: PgVectorStore) -> None:
     await store.upsert(CHUNKS)
     assert len(await store.search("delivery", k=2)) == 2

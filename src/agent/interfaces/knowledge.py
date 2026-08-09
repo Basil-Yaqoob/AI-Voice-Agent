@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 __all__ = ["Chunk", "EmbeddingProvider", "KnowledgeStore", "SearchHit"]
 
@@ -44,7 +44,17 @@ class EmbeddingProvider(Protocol):
     @property
     def dimensions(self) -> int: ...
 
-    async def embed(self, texts: Sequence[str]) -> list[list[float]]: ...
+    async def embed(
+        self, texts: Sequence[str], *, kind: Literal["query", "passage"] = "passage"
+    ) -> list[list[float]]:
+        """Embed text.
+
+        ``kind`` is not cosmetic. Asymmetric retrieval models (the E5 family)
+        are trained with distinct ``query:`` and ``passage:`` prefixes, and
+        omitting them measurably degrades ranking. Providers that do not care
+        may ignore it.
+        """
+        ...
 
 
 @runtime_checkable

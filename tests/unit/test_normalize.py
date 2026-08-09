@@ -118,6 +118,47 @@ def test_digit_by_digit_helper() -> None:
     assert digit_by_digit("102") == "ایک صفر دو"
 
 
+@pytest.mark.parametrize(
+    "raw",
+    ["042-35678901", "021 111 123 456", "0512345678", "+92 42 35678901"],
+)
+def test_landline_numbers_also_digit_by_digit(raw: str) -> None:
+    """Review regression: only the mobile shape was matched, so '042-35678901'
+    became a multi-crore cardinal with the leading zero dropped."""
+    out = normalize_for_tts(f"ہمارا نمبر {raw} ہے")
+    assert "کروڑ" not in out
+    assert "لاکھ" not in out
+    assert not _has_ascii_digit(out)
+    assert "صفر" in out  # the leading zero survives
+
+
+@pytest.mark.parametrize("code", ["ORD-4471", "ORDER-12345", "trk-99", "INV/2026"])
+def test_reference_codes_spelled_out(code: str) -> None:
+    """Review regression: [A-Z]{2,4} missed ORDER-12345 and lowercase codes,
+    which were then read as cardinals."""
+    out = normalize_for_tts(f"آپ کا کوڈ {code} ہے")
+    assert not _has_ascii_digit(out)
+    assert "ہزار" not in out  # not read as a number
+
+
+def test_currency_with_paisa() -> None:
+    """Review regression: 'Rs 1,250.50' leaked a bare ASCII '.' and read the
+    paisa as a detached cardinal."""
+    out = normalize_for_tts("Rs 1,250.50")
+    assert "." not in out
+    assert "روپے" in out
+    assert "پیسے" in out
+
+
+def test_currency_without_paisa_says_no_paisa() -> None:
+    assert normalize_for_tts("Rs. 1,500") == "پندرہ سو روپے"
+
+
+def test_currency_with_zero_paisa_omits_them() -> None:
+    out = normalize_for_tts("Rs 500.00")
+    assert "پیسے" not in out
+
+
 # ── ordering: the rules must not shred each other ──────────────────────────
 
 

@@ -84,6 +84,13 @@ class Settings(BaseSettings):
     redis_url: str = "redis://127.0.0.1:56379/0"
 
     # ---- knowledge --------------------------------------------------------------
+    # Local ONNX by default (DECISION 10): embeddings sit on the speculative
+    # prefetch path, and a hosted API would put a network hop inside the one
+    # path engineered to ~0ms. "hash" is deterministic and for tests only.
+    embedding_provider: Literal["fastembed", "hash"] = "fastembed"
+    embedding_model: str = "intfloat/multilingual-e5-large"
+    embedding_dimensions: int = Field(default=1024, ge=1)
+
     retrieval_top_k: int = Field(default=4, ge=1, le=20)
     answer_cache_ttl_s: int = Field(default=3600, ge=0)
     answer_cache_threshold: float = Field(default=0.93, ge=0.0, le=1.0)

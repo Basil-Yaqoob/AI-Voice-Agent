@@ -81,7 +81,14 @@ class SpeculativePrefetcher:
         if self._task is not None and _close_enough(self._query, final, self._similarity_floor):
             try:
                 hits = await asyncio.wait_for(asyncio.shield(self._task), self._resolve_timeout_s)
-            except (TimeoutError, asyncio.CancelledError, Exception):
+            except asyncio.CancelledError:
+                # The *turn* was cancelled (barge-in, hangup). Must propagate:
+                # swallowing it here would let a dead turn carry on and issue a
+                # fresh search, breaking "no search outlives the call".
+                self._cancel_inflight()
+                self._reset()
+                raise
+            except (TimeoutError, Exception):
                 log.debug("prefetch_unusable", query=self._query)
             else:
                 self.speculative_hits += 1
@@ -100,8 +107,17 @@ class SpeculativePrefetcher:
         self._reset()
 
     def _cancel_inflight(self) -> None:
-        if self._task is not None and not self._task.done():
-            self._task.cancel()
+        task = self._task
+        if task is None:
+            return
+        if not task.done():
+            task.cancel()
+            return
+        # Already finished. If it failed, retrieve the exception so asyncio does
+        # not log "Task exception was never retrieved" for every partial during
+        # a database outage.
+        if not task.cancelled() and task.exception() is not None:
+            log.debug("prefetch_failed", detail=str(task.exception()))
 
     def _reset(self) -> None:
         self._task = None

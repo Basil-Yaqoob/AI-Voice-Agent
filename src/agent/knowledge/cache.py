@@ -94,6 +94,10 @@ class AnswerCache:
             log.debug("answer_cache_skipped", intent=intent, reason="caller_specific")
             return False
         payload = json.dumps({"text": answer, "intent": intent}, ensure_ascii=False)
+        # Redis rejects EX 0. Config permits ttl_s=0 to mean "do not cache", so
+        # honour that here rather than raising mid-call.
+        if self._ttl_s <= 0:
+            return False
         await self._redis.set(self._key(query), payload, ex=self._ttl_s)  # type: ignore[attr-defined]
         return True
 

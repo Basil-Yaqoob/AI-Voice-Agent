@@ -8,11 +8,29 @@ because Inworld's Urdu is experimental and may need swapping mid-demo.
 from __future__ import annotations
 
 from agent.config import Settings
+from agent.interfaces.knowledge import EmbeddingProvider
 from agent.interfaces.llm import LLMProvider
 from agent.interfaces.stt import STTProvider
 from agent.interfaces.tts import TTSProvider
 
-__all__ = ["build_llm", "build_stt", "build_tts"]
+__all__ = ["build_embedder", "build_llm", "build_stt", "build_tts"]
+
+
+def build_embedder(settings: Settings) -> EmbeddingProvider:
+    if settings.embedding_provider == "fastembed":
+        from agent.knowledge.embeddings import FastEmbedProvider
+
+        return FastEmbedProvider(
+            model_name=settings.embedding_model,
+            dimensions=settings.embedding_dimensions,
+        )
+
+    if settings.embedding_provider == "hash":
+        from agent.knowledge.embeddings import HashEmbedder
+
+        return HashEmbedder(settings.embedding_dimensions)
+
+    raise ValueError(f"no embedding provider registered for {settings.embedding_provider!r}")
 
 
 def build_llm(settings: Settings) -> LLMProvider:

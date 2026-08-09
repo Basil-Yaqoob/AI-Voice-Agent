@@ -156,6 +156,47 @@ Full strategy in `02-TESTING-STRATEGY.md`.
 
 ---
 
+## DECISION 10 — Embeddings: local ONNX, `intfloat/multilingual-e5-large`
+
+*Recorded during TASK-07 implementation, 9 Aug 2026.*
+
+**Chosen:** `fastembed` running `intfloat/multilingual-e5-large` locally (1024 dims, ~2.24GB).
+**Rejected:** a hosted embedding API; `paraphrase-multilingual-MiniLM-L12-v2` (384 dims, 0.22GB).
+
+### Why local rather than hosted
+
+1. **Latency.** Embeddings sit on the speculative-prefetch path — the one path in the system deliberately engineered to ~0ms. A hosted embedding call puts a network round trip inside it and defeats the entire mechanism.
+2. **Credentials.** There is no embedding key in this project and no clean route to one: OpenRouter serves no `/embeddings` endpoint, and the Azure key is Speech, not Azure OpenAI.
+
+`fastembed` runs ONNX, so this brings no torch dependency.
+
+### Why the large model, measured
+
+Four Urdu retrieval cases, margin = cosine(query, correct) − cosine(query, distractor):
+
+| Case | MiniLM-L12 | e5-large |
+|---|---:|---:|
+| Urdu paraphrase | +0.313 | +0.053 |
+| Cross-script (Urdu ↔ English) | +0.783 | +0.161 |
+| **Code-switched** | **−0.029 ✗** | **+0.026 ✓** |
+| Product name | +0.677 | +0.074 |
+| **Correct rankings** | **3/4** | **4/4** |
+
+MiniLM discriminates harder where it works, but it **fails the code-switched query** — the defining scenario of this product. Retrieval that cannot handle `میرا order کہاں ہے` is not worth deploying, so the 2.24GB per media-worker container is accepted.
+
+E5's margins look narrow because the model compresses the similarity space into roughly 0.75–0.93. Ranking order is what matters, not absolute values. Note this also means **a similarity threshold tuned on MiniLM numbers would be badly wrong for E5.**
+
+1024 dims matches TASK-07's original DDL — that spec turns out to have been right.
+
+### Two implementation traps
+
+- **E5 is asymmetric.** It is trained with explicit `query: ` and `passage: ` prefixes and degrades measurably without them. `EmbeddingProvider.embed()` therefore takes `kind="query"|"passage"`, and `PgVectorStore` passes the right one on each path. This is not cosmetic.
+- **`fastembed` is synchronous and CPU-bound.** It runs through `run_in_executor` — the same trap as the Azure Speech SDK in TASK-05 — with a test asserting the event loop keeps ticking during a batch embed.
+
+`FastEmbedProvider.warmup()` exists so the 2.24GB model loads at worker startup rather than while a caller waits.
+
+---
+
 ## DECISION 9 — OpenRouter adapter uses the `openai` SDK; both LLM paths are built
 
 *Recorded during TASK-03 implementation, 9 Aug 2026.*

@@ -164,13 +164,28 @@ def _half_form(whole: int) -> str:
     return _HALVES.get(whole, f"ساڑھے {number_to_urdu(whole)}")
 
 
-def _pk_mobile(match: re.Match[str]) -> str:
-    """Pakistani mobile numbers, digit by digit.
+# A Pakistani number carries 9-12 digits once separators are stripped: mobiles
+# are 11 (03001234567), landlines 9-11, UAN 12 (021-111-123-456).
+_PHONE_MIN_DIGITS = 9
+_PHONE_MAX_DIGITS = 12
 
-    A cardinal reading here produces a meaningless multi-crore figure. This is
-    the most jarring single failure an Urdu voice agent can make.
+
+def _pk_phone(match: re.Match[str]) -> str:
+    """Pakistani phone numbers, digit by digit — mobile, landline or UAN.
+
+    A cardinal reading produces a meaningless multi-crore figure and drops the
+    leading zero. This is the most jarring single failure an Urdu voice agent
+    can make, and it applies to landlines exactly as much as to mobiles.
+
+    The digit count is validated here rather than in the pattern: Pakistani
+    numbers are written with one, two or three separators (0300-1234567,
+    021 111 123 456), and a regex strict enough to cover every shape becomes
+    unreadable and over-matches ordinary digit runs.
     """
-    return digit_by_digit(re.sub(r"\D", "", match[0]))
+    digits = re.sub(r"\D", "", match[0])
+    if not _PHONE_MIN_DIGITS <= len(digits) <= _PHONE_MAX_DIGITS:
+        return match[0]  # not a phone number; leave it for the integer rule
+    return digit_by_digit(digits)
 
 
 def _reference(match: re.Match[str]) -> str:
@@ -185,8 +200,13 @@ def _reference(match: re.Match[str]) -> str:
 
 
 def _currency(match: re.Match[str]) -> str:
-    amount = int(match[1].replace(",", ""))
-    return f"{number_to_urdu(amount)} روپے"
+    """Amounts, including paisa. 'Rs 1,250.50' must not leak a bare '.50'."""
+    rupees = int(match[1].replace(",", ""))
+    paisa = match[2]
+    spoken = f"{number_to_urdu(rupees)} روپے"
+    if paisa and int(paisa.ljust(2, "0")) > 0:
+        spoken += f" {number_to_urdu(int(paisa.ljust(2, '0')))} پیسے"
+    return spoken
 
 
 def _percent(match: re.Match[str]) -> str:
@@ -214,11 +234,19 @@ def _integer(match: re.Match[str]) -> str:
 _RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
     (re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b"), _date),
     (re.compile(r"\b(\d{1,2}):(\d{2})\b"), _time),
-    # PK mobile is 0 + 3-digit operator prefix + 7 digits = 11 total (03001234567).
-    (re.compile(r"\b0\d{3}[- ]?\d{7}\b"), _pk_mobile),
-    (re.compile(r"\+92[- ]?\d{3}[- ]?\d{7}\b"), _pk_mobile),
-    (re.compile(r"\b[A-Z]{2,4}-\d{3,10}\b"), _reference),
-    (re.compile(r"(?:Rs\.?|PKR|روپے)\s*([\d,]+)", re.IGNORECASE), _currency),
+    # Any Pakistani phone shape, digit by digit. Covers mobiles
+    # (0300-1234567, +92-300-1234567) and landlines with a 2-5 digit area code
+    # (042-35678901, 021 111 123 456). Reading a landline as a cardinal is the
+    # same failure as reading a mobile that way.
+    (re.compile(r"\+92[\d\s-]{9,16}\d"), _pk_phone),
+    (re.compile(r"\b0\d[\d\s-]{7,14}\d\b"), _pk_phone),
+    # Reference codes. Deliberately loose on letter count and case: ORD-4471,
+    # ORDER-12345 and trk-99 are all codes to spell out, not numbers to read.
+    (re.compile(r"\b[A-Za-z]{2,8}[-/]\d{2,12}\b"), _reference),
+    (
+        re.compile(r"(?:Rs\.?|PKR|روپے)\s*([\d,]+)(?:\.(\d{1,2}))?", re.IGNORECASE),
+        _currency,
+    ),
     (re.compile(r"\b(\d{1,3})\s*%"), _percent),
     (re.compile(r"\b(\d+)\.(\d+)\b"), _decimal),
     (re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)\b", re.IGNORECASE), _ordinal),
