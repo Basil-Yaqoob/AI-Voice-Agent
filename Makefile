@@ -26,14 +26,16 @@ dev:
 down:
 	docker compose down
 
+# -m "not contract" matters: contract tests live under tests/integration/ but hit
+# real vendor APIs and cost money. They must never run in the everyday loop.
 test:
-	uv run pytest tests/unit tests/integration -v
+	uv run pytest tests/unit tests/integration -m "not contract" -v
 
 test-unit:
 	uv run pytest tests/unit -q
 
 test-integration:
-	uv run pytest tests/integration -v
+	uv run pytest tests/integration -m "not contract" -v
 
 test-latency:
 	uv run pytest tests/latency -v

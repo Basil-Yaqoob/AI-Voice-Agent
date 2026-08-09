@@ -49,7 +49,9 @@ docker compose down || exit /b 1
 goto :eof
 
 :test
-uv run pytest tests/unit tests/integration -v || exit /b 1
+REM -m "not contract": contract tests live under tests/integration but hit real
+REM vendor APIs and cost money. Never run them in the everyday loop.
+uv run pytest tests/unit tests/integration -m "not contract" -v || exit /b 1
 goto :eof
 
 :test-unit
@@ -57,7 +59,7 @@ uv run pytest tests/unit -q || exit /b 1
 goto :eof
 
 :test-integration
-uv run pytest tests/integration -v || exit /b 1
+uv run pytest tests/integration -m "not contract" -v || exit /b 1
 goto :eof
 
 :test-latency

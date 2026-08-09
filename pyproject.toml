@@ -19,6 +19,7 @@ dependencies = [
     "structlog>=24.4",
     "prometheus-client>=0.21",
     "openai>=2.53.0",
+    "pyyaml>=6.0.3",
 ]
 
 [dependency-groups]
@@ -80,7 +81,7 @@ mypy_path = "src"
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["livekit.*", "deepgram.*", "azure.*", "pgvector.*"]
+module = ["livekit.*", "deepgram.*", "azure.*", "pgvector.*", "asyncpg.*"]
 ignore_missing_imports = true
 
 # ── Tests ───────────────────────────────────────────────────────────────

@@ -77,8 +77,11 @@ class Settings(BaseSettings):
     endpoint_silence_ms: int = Field(default=180, ge=1)
 
     # ---- data -----------------------------------------------------------------
-    database_url: str = "postgresql://agent:localdev@localhost:5432/voiceagent"
-    redis_url: str = "redis://localhost:6379/0"
+    # Non-default ports: a native Postgres/Redis install often already owns 5432
+    # or 6379, and the collision surfaces as an auth failure rather than a bind
+    # error. See docker-compose.yml.
+    database_url: str = "postgresql://agent:localdev@127.0.0.1:55432/voiceagent"
+    redis_url: str = "redis://127.0.0.1:56379/0"
 
     # ---- knowledge --------------------------------------------------------------
     retrieval_top_k: int = Field(default=4, ge=1, le=20)

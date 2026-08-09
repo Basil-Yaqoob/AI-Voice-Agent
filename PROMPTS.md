@@ -57,6 +57,52 @@ Run `make lint` and `make test` at the end, show real output.
 
 ## Session 3 — Language and knowledge (TASK-06, TASK-07)
 
+*Updated 9 Aug 2026 after session 2 — carries findings that change both tasks.*
+
+```
+Read CLAUDE.md, then docs/01-TECH-DECISIONS.md (especially DECISION 9).
+TASK-01 through TASK-05 are complete and committed (3577f46). Do not redo them.
+
+Environment notes that will otherwise waste your time:
+- `make` is absent on Windows. Use `.\make.cmd <target>`.
+- Ruff's allowed-confusables is already configured for Urdu punctuation.
+  Do not "fix" U+06D4 - RUF001 suggests replacing it with a hyphen, which
+  would break the sentence chunker.
+- LLM_PROVIDER=openrouter. Fakes already exist in tests/fakes/.
+
+Implement TASK-06 and TASK-07 from their docs.
+
+TASK-06 (Urdu normalisation) - mostly pure string functions, deepest test
+coverage in the project:
+- The 0-99 numerals MUST be a lookup table, not generated. Urdu numerals are
+  irregular and generated ones are subtly wrong.
+- South Asian grouping (لاکھ, کروڑ), not Western.
+- Pakistani mobile numbers digit-by-digit, never as a cardinal.
+- Idiomatic halves: ڈیڑھ, ڈھائی, ساڑھے تین - not اعشاریہ.
+- Produce tests/fixtures/golden/urdu_normalization.yaml and flag clearly in
+  your summary that it needs native-speaker review before I trust it.
+
+TASK-07 (knowledge) - two measured findings from session 2 change this:
+1. Deepgram returns English words TRANSLITERATED INTO URDU SCRIPT
+   ("order" -> "ارڈن", "deliver" -> "ڈلیور"), not preserved as Latin. So
+   dual indexing must cover Urdu-script spellings of English product terms,
+   and intent matching cannot rely on Latin substring checks.
+2. prefix_is_cacheable() already exists in agent/language/prompts.py. The
+   corpus-size check must use it: caching is what makes the cached-corpus
+   route cheaper than retrieval, and Haiku 4.5 was measured never caching
+   at 1282 tokens.
+
+Build the corpus-size check first. If the corpus fits the cached prefix, say
+so rather than building retrieval speculatively. The speculative prefetch is
+the part that matters - include the latency test proving retrieval stays off
+the critical path.
+
+Run `.\make.cmd lint` and `.\make.cmd test`, show real output, not a summary.
+If something in the docs is wrong or won't work, say so before implementing it.
+```
+
+### Original session 3 brief (superseded by the above)
+
 ```
 Read CLAUDE.md. TASK-01 through TASK-05 are complete.
 

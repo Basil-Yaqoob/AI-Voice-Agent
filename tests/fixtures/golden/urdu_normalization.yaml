@@ -1,0 +1,105 @@
+# Golden expectations for Urdu number/date/time normalisation.
+#
+# ⚠️  NEEDS NATIVE-SPEAKER REVIEW BEFORE IT IS TRUSTED.
+#
+# The automated tests confirm STABILITY, not CORRECTNESS. They lock in whatever
+# is written here — including mistakes. Until a native Urdu speaker has read
+# this file and signed off, treat every expectation as a guess by a non-speaker.
+#
+# Review checklist for whoever signs off:
+#   1. Are the 0-99 numerals right? (agent/language/numbers.py) Urdu numerals are
+#      irregular; 21 = اکیس is not a compound of بیس and ایک.
+#   2. Is the colloquial hundreds form right? Is 1500 "پندرہ سو" in speech?
+#   3. Are the half-forms idiomatic? ڈیڑھ / ڈھائی / ساڑھے تین, not اعشاریہ.
+#   4. Do the time expressions sound natural on a phone call?
+#   5. Is لاکھ / کروڑ grouping what a Karachi caller expects?
+#
+# reviewed_by:   (name)
+# reviewed_date: (yyyy-mm-dd)
+reviewed_by: null
+reviewed_date: null
+
+cases:
+  # ── plain integers ────────────────────────────────────────────────────
+  - input: "0"
+    expected: "صفر"
+    note: zero
+  - input: "7"
+    expected: "سات"
+    note: single digit
+  - input: "21"
+    expected: "اکیس"
+    note: irregular - not a compound of بیس and ایک
+  - input: "48"
+    expected: "اڑتالیس"
+    note: irregular forties
+  - input: "99"
+    expected: "ننانوے"
+    note: top of the lookup table
+  - input: "100"
+    expected: "ایک سو"
+    note: first scale
+
+  # ── South Asian grouping ──────────────────────────────────────────────
+  - input: "1500"
+    expected: "پندرہ سو"
+    note: colloquial hundreds form, not ایک ہزار پانچ سو
+  - input: "3000"
+    expected: "تین ہزار"
+    note: round thousand keeps the ہزار form
+  - input: "100000"
+    expected: "ایک لاکھ"
+    note: lakh, NOT one hundred thousand
+  - input: "250000"
+    expected: "دو لاکھ پچاس ہزار"
+    note: lakh with remainder
+  - input: "10000000"
+    expected: "ایک کروڑ"
+    note: crore
+
+  # ── currency ───────────────────────────────────────────────────────────
+  - input: "Rs. 1,500"
+    expected: "پندرہ سو روپے"
+    note: comma separator stripped
+  - input: "PKR 250"
+    expected: "دو سو پچاس روپے"
+    note: PKR prefix
+
+  # ── percentages and decimals ───────────────────────────────────────────
+  - input: "50%"
+    expected: "پچاس فیصد"
+    note: percentage
+  - input: "1.5"
+    expected: "ڈیڑھ"
+    note: idiomatic half, not ایک اعشاریہ پانچ
+  - input: "2.5"
+    expected: "ڈھائی"
+    note: idiomatic half
+  - input: "3.5"
+    expected: "ساڑھے تین"
+    note: idiomatic half from three upward
+
+  # ── dates and times ────────────────────────────────────────────────────
+  - input: "2026-08-08"
+    expected: "آٹھ اگست دو ہزار چھبیس"
+    note: must be consumed before the integer rule shreds it
+  - input: "09:00"
+    expected: "صبح نو بجے"
+    note: morning
+  - input: "14:30"
+    expected: "دوپہر ڈھائی بجے"
+    note: half past two uses ڈھائی
+  - input: "13:15"
+    expected: "دوپہر سوا ایک بجے"
+    note: quarter past
+  - input: "20:45"
+    expected: "رات پونے نو بجے"
+    note: quarter to nine at night
+
+  # ── code-switching ─────────────────────────────────────────────────────
+  - input: "آپ کا order کل آئے گا"
+    expected: "آپ کا order کل آئے گا"
+    note: English noun preserved in Latin script, untouched
+  - input: "آپ کا balance 2500 روپے ہے"
+    expected: "آپ کا balance دو ہزار پانچ سو روپے ہے"
+    note: English preserved, number converted
