@@ -14,10 +14,40 @@
 #   4. Do the time expressions sound natural on a phone call?
 #   5. Is لاکھ / کروڑ grouping what a Karachi caller expects?
 #
+# Review sheet with audio for every case below:
+#   https://claude.ai/code/artifact/51bd8b30-5134-4ce3-b374-808fedb8bcc6
+#   (regenerate with: uv run python eval/make_review_sheet.py)
+#
 # reviewed_by:   (name)
 # reviewed_date: (yyyy-mm-dd)
 reviewed_by: null
 reviewed_date: null
+
+# The 0-99 table was diffed against an independent reference on 9 Aug 2026:
+# 94/100 agreed. These six differ, and both spellings are attested. A native
+# speaker picks; until then the "ours" column is what numbers.py produces.
+#
+# This is a real decision, not a typo hunt: 51, 91 and 92 all appear in
+# everyday amounts.
+contested_numerals:
+  - n: 51
+    ours: اکاون
+    alternative: اکیاون
+  - n: 64
+    ours: چونسٹھ
+    alternative: چوسٹھ
+  - n: 68
+    ours: اڑسٹھ
+    alternative: اٹھسٹھ
+  - n: 75
+    ours: پچہتر
+    alternative: پچھتر
+  - n: 91
+    ours: اکانوے
+    alternative: اکیانوے
+  - n: 92
+    ours: بانوے
+    alternative: بیانوے
 
 cases:
   # ── plain integers ────────────────────────────────────────────────────

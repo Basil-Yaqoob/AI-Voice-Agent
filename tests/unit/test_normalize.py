@@ -320,6 +320,24 @@ def test_against_golden_file(project_root: Path) -> None:
     assert not failures, "\n".join(failures)
 
 
+def test_contested_numerals_match_the_code(project_root: Path) -> None:
+    """The 'ours' column must track numbers.py.
+
+    Without this the contested list silently goes stale, and a reviewer would
+    be choosing between a spelling we no longer produce and an alternative.
+    """
+    for entry in _golden(project_root)["contested_numerals"]:  # type: ignore[index]
+        assert number_to_urdu(entry["n"]) == entry["ours"], (
+            f"numbers.py now produces {number_to_urdu(entry['n'])!r} for "
+            f"{entry['n']}, but the review sheet still offers {entry['ours']!r}"
+        )
+
+
+def test_contested_alternatives_differ(project_root: Path) -> None:
+    for entry in _golden(project_root)["contested_numerals"]:  # type: ignore[index]
+        assert entry["ours"] != entry["alternative"], f"{entry['n']} lists identical options"
+
+
 def test_golden_file_review_status_is_visible(project_root: Path) -> None:
     """Not a failure — a standing reminder in the test output.
 
