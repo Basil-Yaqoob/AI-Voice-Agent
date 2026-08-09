@@ -27,21 +27,24 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 
-__all__ = ["ENGLISH_TO_URDU", "transliterate_for_speech", "unmapped_words"]
+__all__ = [
+    "ENGLISH_PRONUNCIATION",
+    "ENGLISH_TO_URDU",
+    "speech_form",
+    "transliterate_for_speech",
+    "unmapped_words",
+]
 
-# Reviewed by ear, 9 Aug 2026 (Basil): 48 of 50 entries approved.
-# Regenerate the listening sheet with: uv run python eval/make_translit_sheet.py
+# Words the reviewer wants said in an English accent, not an Urdu one
+# (round 4, 10 Aug 2026). Transliteration cannot produce that by definition:
+# writing a word in Urdu script is exactly what makes it Urdu-accented. These
+# are therefore left in Latin, and the TTS layer wraps them in an SSML
+# <lang xml:lang="en-US"> switch — measured to work inside ur-PK-UzmaNeural.
 #
-# ⚠️ Five words are NOT settled and are pending round 4:
-#   track, paid  - rejected outright
-#   app, call, data - accepted, but the reviewer wants English pronunciation
-#
-# These are a different problem from a wrong spelling. The reviewer wants the
-# English *sound*, which transliteration cannot give by definition. Measured
-# 10 Aug 2026: an SSML <lang xml:lang="en-US"> switch inside the ur-PK voice
-# does change the audio, so it is achievable without changing voice — see
-# ENGLISH_PRONUNCIATION below, currently unused pending the round-4 verdict.
-ENGLISH_PRONUNCIATION: frozenset[str] = frozenset()
+# Not a contradiction with "order" preferring transliteration in round 2: an
+# order is an آرڈر to a Pakistani caller, but data is data. It is a per-word
+# property of the vocabulary, which is what a lexicon is for.
+ENGLISH_PRONUNCIATION: frozenset[str] = frozenset({"track", "paid", "app", "call", "data"})
 ENGLISH_TO_URDU: dict[str, str] = {
     # ── order and delivery ────────────────────────────────────────────
     "order": "آرڈر",
@@ -103,6 +106,25 @@ ENGLISH_TO_URDU: dict[str, str] = {
 _WORD = re.compile(r"\b[A-Za-z][A-Za-z'-]*\b")
 
 
+def speech_form(word: str, *, extra: Mapping[str, str] | None = None) -> str:
+    """How one English word should be written for TTS.
+
+    The single place this decision is made. Three outcomes:
+
+    * in :data:`ENGLISH_PRONUNCIATION` -> left in Latin, so the SSML layer
+      switches language and the voice says it in English;
+    * in the lexicon -> Urdu script, so the voice says it Pakistani-style;
+    * unknown -> left in Latin, which also lands on the English switch. That is
+      the better failure: a guessed spelling would sound wrong and be invisible.
+    """
+    folded = word.casefold()
+    if folded in ENGLISH_PRONUNCIATION:
+        return word
+    if extra and folded in {k.casefold() for k in extra}:
+        return {k.casefold(): v for k, v in extra.items()}[folded]
+    return ENGLISH_TO_URDU.get(folded, word)
+
+
 def transliterate_for_speech(
     text: str,
     *,
@@ -115,12 +137,7 @@ def transliterate_for_speech(
     voice pronounces them badly, but a wrong guess at the spelling would be worse
     and harder to notice. Use :func:`unmapped_words` to find the gaps.
     """
-    lexicon = {**ENGLISH_TO_URDU, **{k.casefold(): v for k, v in (extra or {}).items()}}
-
-    def _swap(match: re.Match[str]) -> str:
-        return lexicon.get(match[0].casefold(), match[0])
-
-    return _WORD.sub(_swap, text)
+    return _WORD.sub(lambda m: speech_form(m[0], extra=extra), text)
 
 
 def unmapped_words(text: str, *, extra: Mapping[str, str] | None = None) -> list[str]:

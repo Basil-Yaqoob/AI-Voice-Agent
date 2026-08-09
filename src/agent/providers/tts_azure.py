@@ -22,6 +22,7 @@ from typing import Any
 
 import azure.cognitiveservices.speech as speechsdk
 
+from agent.language.ssml import build_ssml
 from agent.telemetry.logging import get_logger
 
 __all__ = ["AzureTTS"]
@@ -40,10 +41,12 @@ class AzureTTS:
         key: str,
         region: str = "southeastasia",
         sample_rate: int = 24_000,
+        lang: str = "ur-PK",
     ) -> None:
         self._key = key
         self._region = region
         self._sample_rate = sample_rate
+        self._lang = lang
         if not region.startswith(("southeastasia", "centralindia", "uaenorth")):
             log.warning(
                 "tts_region_far_from_pakistan",
@@ -74,6 +77,10 @@ class AzureTTS:
         )
         synthesizer = speechsdk.SpeechSynthesizer(speech_config=config, audio_config=None)
 
+        # SSML rather than plain text: any Latin-script run reaching this point
+        # is meant to be pronounced in English, and only SSML can say that.
+        ssml = build_ssml(text, voice=voice, lang=self._lang)
+
         def _emit(item: Any) -> None:
             # SDK callbacks fire on SDK threads, not the event loop.
             loop.call_soon_threadsafe(queue.put_nowait, item)
@@ -85,7 +92,7 @@ class AzureTTS:
         )
 
         # The blocking .get() must never run on the event loop.
-        task = loop.run_in_executor(None, lambda: synthesizer.speak_text_async(text).get())
+        task = loop.run_in_executor(None, lambda: synthesizer.speak_ssml_async(ssml).get())
 
         try:
             while True:

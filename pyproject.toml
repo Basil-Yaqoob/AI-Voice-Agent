@@ -68,6 +68,10 @@ allowed-confusables = [
     "،", # U+060C ARABIC COMMA
     "؟", # U+061F ARABIC QUESTION MARK - also a chunker boundary
     "؛", # U+061B ARABIC SEMICOLON
+    # U+2019 RIGHT SINGLE QUOTATION MARK. Models emit it in possessives
+    # ("customer's"), so it is data this codebase handles on purpose rather than
+    # a straight quote someone fat-fingered.
+    "’",
 ]
 
 [tool.ruff.lint.per-file-ignores]

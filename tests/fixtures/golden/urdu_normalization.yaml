@@ -167,5 +167,14 @@ cases:
     expected: "میں ٹریکنگ چیک کر کے بتاتا ہوں"
     note: two English verbs in one Urdu clause
   - input: "Premium Plan میں unlimited data ہے"
-    expected: "پریمیم پلان میں ان لمیٹڈ ڈیٹا ہے"
-    note: multi-word product name, each token transliterated
+    expected: "پریمیم پلان میں ان لمیٹڈ data ہے"
+    note: >
+      Product name transliterated, but "data" deliberately stays in Latin -
+      round 4 review asked for English pronunciation of that word, and the SSML
+      layer switches language for any Latin run.
+  - input: "آپ کا data ختم ہو گیا ہے"
+    expected: "آپ کا data ختم ہو گیا ہے"
+    note: English-pronunciation word survives untouched for the SSML switch
+  - input: "میں آپ کو call کروں گا"
+    expected: "میں آپ کو call کروں گا"
+    note: call stays Latin (round 4)

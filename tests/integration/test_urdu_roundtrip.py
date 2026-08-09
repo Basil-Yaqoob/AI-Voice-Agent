@@ -62,6 +62,30 @@ async def test_both_pakistani_voices_exist(live: Settings, voice: str) -> None:
     assert len(audio) > 1000
 
 
+async def test_azure_accepts_the_generated_ssml(live: Settings) -> None:
+    """The adapter now sends SSML, not plain text. Malformed markup is rejected
+    by Azure mid-call, which drops the turn — so exercise the real parser."""
+    from agent.language.normalize import normalize_for_tts
+
+    tts = build_tts(live)
+    spoken = normalize_for_tts("آپ کا order کل آئے گا اور data ختم ہے، Rs. 1,500 due")
+    audio = b"".join([c async for c in tts.synthesize(spoken, voice=live.tts_voice_urdu)])
+    assert len(audio) > 10_000, "Azure rejected the SSML or returned nothing"
+
+
+async def test_language_switch_changes_the_audio(live: Settings) -> None:
+    """The whole English-pronunciation design rests on ur-PK honouring
+    <lang xml:lang="en-US">. Verify against the live service, not by assumption."""
+    tts = build_tts(live)
+    with_switch = b"".join(
+        [c async for c in tts.synthesize("میں data چیک کرتا ہوں", voice=live.tts_voice_urdu)]
+    )
+    urdu_only = b"".join(
+        [c async for c in tts.synthesize("میں ڈیٹا چیک کرتا ہوں", voice=live.tts_voice_urdu)]
+    )
+    assert with_switch != urdu_only, "language switch had no effect on the rendered audio"
+
+
 # ── Deepgram Nova-3 Urdu ───────────────────────────────────────────────────
 
 

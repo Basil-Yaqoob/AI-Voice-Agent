@@ -16,7 +16,7 @@ import re
 from collections.abc import Callable, Iterable
 
 from agent.language.numbers import ORDINALS, digit_by_digit, number_to_urdu
-from agent.language.translit import ENGLISH_TO_URDU
+from agent.language.translit import ENGLISH_TO_URDU, speech_form
 
 __all__ = ["ENGLISH_KEEP", "normalize_for_tts"]
 
@@ -264,13 +264,12 @@ def _normalize(text: str, preserve: frozenset[str]) -> str:
     for pattern, handler in _RULES:
         text = pattern.sub(handler, text)
 
-    # Restore as Urdu script, not Latin. Native review 9 Aug 2026: the ur-PK
-    # voice mispronounces Latin-script English, and writing the word the way an
-    # Urdu speaker writes it gives a natural Pakistani pronunciation. Only the
-    # TTS input is rewritten — history and transcripts keep the Latin form.
+    # Restore in whichever script the word should be *spoken* in. speech_form()
+    # owns that decision so it is made in exactly one place — a second copy of
+    # this lookup is how `data` silently kept getting transliterated after the
+    # reviewer asked for it in English.
     for index, word in enumerate(protected):
-        spoken = ENGLISH_TO_URDU.get(word.casefold(), word)
-        text = text.replace(_placeholder(index), spoken)
+        text = text.replace(_placeholder(index), speech_form(word))
 
     return re.sub(r"[ \t]{2,}", " ", text).strip()
 
