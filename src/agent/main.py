@@ -40,6 +40,7 @@ from agent.telemetry.logging import configure_logging, get_logger
 from agent.telemetry.metrics import TurnMetrics
 from agent.tools.demo_backend import build_demo_registry
 from agent.tools.dvago_backend import DvagoBackend, build_dvago_registry
+from agent.transport.ringback import Ringback
 
 __all__ = ["CORPUS_DIR", "DVAGO_DB", "VoiceAgent", "bootstrap", "main"]
 
@@ -126,6 +127,7 @@ class VoiceAgent:
         self._endpointer = AdaptiveEndpointer(base_ms=settings.endpoint_silence_ms)
         self._barge_in = BargeInDetector()
         self._interrupts = InterruptController(sink)
+        self._ringback = Ringback(sink)
 
         self._history: list[Message] = []
         self._call_id = f"call_{uuid4().hex[:8]}"
@@ -167,16 +169,41 @@ class VoiceAgent:
         up — the caller cannot tell a connected call from a dead one. The
         realtime path gets this from the API; the pipeline has to do it here.
 
+        The wait in front of the greeting is not small — a second for the far
+        end to subscribe, plus whatever the TTS vendor takes to produce its
+        first byte, which for Uplift is another 1.5s. A ringing tone covers it,
+        so the caller hears something that means "connecting" rather than
+        nothing at all.
+
         Failure is not fatal: a caller who hears no greeting can still be
         helped, so a broken TTS at this moment must not end the call.
         """
-        # See the note in transport/realtime.py: the far end has to finish
-        # subscribing or the opening syllables are played to nobody.
-        await asyncio.sleep(GREETING_SETTLE_S)
+        self._ringback.start()
         try:
-            await self._sink.play(
-                self._tts.synthesize(GREETING_URDU, voice=self._voice)
+            speech = self._tts.synthesize(GREETING_URDU, voice=self._voice)
+            # The two waits are independent, so they run under the same tone:
+            # the far end subscribing (see transport/realtime.py — greet before
+            # that and the opening syllables are played to nobody) and the
+            # vendor rendering its first byte. Serialising them would add a
+            # second of ringing for nothing.
+            first, _ = await asyncio.gather(
+                _first_chunk(speech), asyncio.sleep(GREETING_SETTLE_S)
             )
+        except Exception as exc:
+            log.warning("greeting_failed", detail=str(exc)[:200])
+            return
+        finally:
+            # Before any real audio, always: the tone holds the sink's playback
+            # lock, and it clears the queue on the way out so the greeting is
+            # not stuck behind a fragment of ring.
+            await self._ringback.stop()
+
+        if first is None:
+            log.warning("greeting_empty")
+            return
+
+        try:
+            await self._sink.play(_then(first, speech))
         except Exception as exc:
             log.warning("greeting_failed", detail=str(exc)[:200])
             return
@@ -201,6 +228,11 @@ class VoiceAgent:
 
     async def on_speech_started(self) -> None:
         """VAD fired. Only a real interruption if the agent is mid-response."""
+        # A caller who says "hello?" over the ringing tone has answered the
+        # question the tone was asking. Carrying on ringing at them would be
+        # the one thing worse than the silence it replaced.
+        await self._ringback.stop()
+
         if not self._state.is_responding:
             return
         result = await self._interrupts.interrupt()
@@ -388,6 +420,36 @@ class VoiceAgent:
         Deepgram connections per call, one of them silently idle.
         """
         return self._stt
+
+    @property
+    def ringback(self) -> Ringback:
+        """The tone that covers the wait before the first word.
+
+        Exposed because the realtime path does not use ``greet()`` — the API
+        speaks the greeting itself — so the session has to stop the tone when
+        its first audio arrives.
+        """
+        return self._ringback
+
+
+async def _first_chunk(stream: Any) -> bytes | None:
+    """Pull audio until there is some, leaving the rest of the stream unread.
+
+    This is what makes the tone stop at the right moment: the vendor's
+    time-to-first-byte is the wait worth covering, and everything after it
+    streams.
+    """
+    async for chunk in stream:
+        if chunk:
+            return bytes(chunk)
+    return None
+
+
+async def _then(first: bytes, rest: Any) -> Any:
+    """Put an already-pulled chunk back in front of the stream it came from."""
+    yield first
+    async for chunk in rest:
+        yield chunk
 
 
 def open_database(path: Path = DVAGO_DB) -> Database | None:

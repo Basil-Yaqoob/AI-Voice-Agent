@@ -25,9 +25,15 @@ class _FakeSource:
         self.frames: list[object] = []
         self.clears = 0
         self.closed = False
+        # A real AudioSource blocks against playout. Off by default so the
+        # frame-splitting tests stay instant; the ringing tone needs it, since
+        # a tone generated as fast as the CPU allows is a busy loop.
+        self.pace = 0.0
 
     async def capture_frame(self, frame: object) -> None:
         self.frames.append(frame)
+        if self.pace:
+            await asyncio.sleep(self.pace)
 
     def clear_queue(self) -> None:
         self.clears += 1
@@ -257,6 +263,101 @@ def _agent(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("DEEPGRAM_API_KEY", "test")
     monkeypatch.setenv("AZURE_SPEECH_KEY", "test")
     return VoiceAgent(Settings(), room=object(), sink=_sink())
+
+
+# ── the greeting, and the tone that covers the wait for it ───────────────────
+#
+# Between answering and the first syllable there is a second for the far end to
+# subscribe plus the vendor's time-to-first-byte — 1.5s for Uplift. Silence
+# there reads as a call that failed to connect. The tone fills it, but it holds
+# the sink's playback lock while it does, so a botched handover does not
+# degrade to the old silence: it loses the greeting altogether.
+
+
+class _FakeTTS:
+    """A vendor with a controllable time-to-first-byte."""
+
+    name = "fake"
+    sample_rate = 24_000
+
+    def __init__(self, ttfb: float = 0.0, body: bytes = b"\x7f\x11" * 240) -> None:
+        self._ttfb = ttfb
+        self._body = body
+
+    async def synthesize(self, text: str, voice: str | None = None) -> AsyncIterator[bytes]:
+        await asyncio.sleep(self._ttfb)
+        yield self._body
+
+
+def _greeting_agent(monkeypatch: pytest.MonkeyPatch, tts: _FakeTTS):
+    import agent.main as main
+
+    monkeypatch.setattr(main, "GREETING_SETTLE_S", 0.02)
+    agent = _agent(monkeypatch)
+    agent._tts = tts  # type: ignore[assignment]
+    agent._publish = _noop  # type: ignore[assignment]
+    agent._sink._source.pace = 0.002
+    return agent
+
+
+async def _noop(payload: dict) -> None:
+    return None
+
+
+async def test_the_caller_is_not_left_in_silence_before_the_greeting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = b"\x7f\x11" * 240
+    agent = _greeting_agent(monkeypatch, _FakeTTS(ttfb=0.05, body=body))
+
+    await agent.greet()
+
+    written = b"".join(f.data for f in agent._sink._source.frames)
+    assert written.endswith(body), "the greeting must be the last thing played"
+    assert len(written) > len(body), "nothing was played while the caller waited"
+
+
+async def test_the_greeting_is_not_lost_behind_the_tone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The failure mode of this feature: the tone never gives the sink back."""
+    body = b"\x22\x33" * 240
+    agent = _greeting_agent(monkeypatch, _FakeTTS(body=body))
+
+    async with asyncio.timeout(5):
+        await agent.greet()
+
+    assert b"".join(f.data for f in agent._sink._source.frames).endswith(body)
+    assert not agent.ringback.is_ringing
+    assert agent._sink._source.clears == 1, "queued tone was not dropped"
+
+
+async def test_a_vendor_that_never_answers_does_not_ring_forever(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A greeting that fails leaves the caller with a live line, not a ring."""
+
+    class _Broken(_FakeTTS):
+        async def synthesize(self, text: str, voice: str | None = None) -> AsyncIterator[bytes]:
+            raise RuntimeError("no such voice")
+            yield b""  # unreachable; keeps this an async generator
+
+    agent = _greeting_agent(monkeypatch, _Broken())
+    await agent.greet()
+
+    assert not agent.ringback.is_ringing
+
+
+async def test_a_caller_who_speaks_over_the_tone_is_not_rung_at(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = _greeting_agent(monkeypatch, _FakeTTS())
+    agent.begin()
+    agent.ringback.start()
+
+    await agent.on_speech_started()
+
+    assert not agent.ringback.is_ringing
 
 
 def test_a_fresh_agent_starts_idle(monkeypatch: pytest.MonkeyPatch) -> None:

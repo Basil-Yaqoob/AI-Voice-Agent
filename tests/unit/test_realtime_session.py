@@ -66,7 +66,30 @@ def _registry() -> ToolRegistry:
     return registry
 
 
-def _session(ws: _WS, sink: _Sink, published: list[dict[str, Any]]) -> RealtimeSession:
+class _Ring:
+    """Records when the tone was silenced, relative to the first real audio."""
+
+    def __init__(self, sink: _Sink) -> None:
+        self._sink = sink
+        self.starts = 0
+        self.stops = 0
+        self.played_when_stopped: int | None = None
+
+    def start(self) -> None:
+        self.starts += 1
+
+    async def stop(self) -> None:
+        self.stops += 1
+        if self.played_when_stopped is None:
+            self.played_when_stopped = len(self._sink.played)
+
+
+def _session(
+    ws: _WS,
+    sink: _Sink,
+    published: list[dict[str, Any]],
+    ringback: Any = None,
+) -> RealtimeSession:
     async def publish(payload: dict[str, Any]) -> None:
         published.append(payload)
 
@@ -78,6 +101,7 @@ def _session(ws: _WS, sink: _Sink, published: list[dict[str, Any]]) -> RealtimeS
         tools=_registry(),
         sink=sink,
         publish=publish,
+        ringback=ringback,
     )
     session._ws = ws
     return session
@@ -112,11 +136,96 @@ async def test_audio_deltas_reach_the_sink() -> None:
     ws = _WS([{"type": "response.output_audio.delta", "delta": _audio(b"\x01\x02")}])
     sink = _Sink()
     session = _session(ws, sink, [])
-    player = asyncio.create_task(session._play())
+    # No player is started here: the first delta opens it, because until there
+    # is audio the sink belongs to the ringing tone.
     await session._receive()
     await session._audio_out.put(None)
-    await player
+    assert session._player is not None
+    await session._player
     assert sink.played == [b"\x01\x02"]
+
+
+# ── the ringing tone ─────────────────────────────────────────────────────────
+#
+# The wait between answering and the model's first word is a second and a half
+# of dead air, which on a phone reads as a failed call. The tone covers it, and
+# it holds the sink's playback lock while it does — so getting the handover
+# wrong does not degrade to silence, it loses the greeting entirely.
+
+
+async def test_the_caller_hears_something_while_the_model_thinks() -> None:
+    ring = _Ring(_Sink())
+    session = _session(_WS([]), _Sink(), [], ringback=ring)
+    await session._configure()
+    if session._ringback is not None:
+        session._ringback.start()
+
+    assert ring.starts == 1
+
+
+async def test_the_tone_stops_before_the_first_word_not_after() -> None:
+    sink = _Sink()
+    ring = _Ring(sink)
+    ws = _WS([{"type": "response.output_audio.delta", "delta": _audio(b"\x01\x02")}])
+    session = _session(ws, sink, [], ringback=ring)
+
+    ring.start()
+    await session._receive()
+    await session._audio_out.put(None)
+    assert session._player is not None
+    await session._player
+
+    assert ring.stops == 1
+    assert ring.played_when_stopped == 0, "the greeting played over the ringing tone"
+    assert sink.played == [b"\x01\x02"]
+
+
+async def test_a_caller_who_talks_over_the_tone_is_not_rung_at() -> None:
+    """Answering the tone is exactly the thing the tone was asking about."""
+    sink = _Sink()
+    ring = _Ring(sink)
+    ws = _WS([{"type": "input_audio_buffer.speech_started"}])
+    session = _session(ws, sink, [], ringback=ring)
+
+    ring.start()
+    await session._receive()
+
+    assert ring.stops == 1
+
+
+async def test_the_sink_is_only_opened_once() -> None:
+    """A second player on one AudioSource is the corruption the sink locks against."""
+    sink = _Sink()
+    ring = _Ring(sink)
+    ws = _WS(
+        [
+            {"type": "response.output_audio.delta", "delta": _audio(b"\x01")},
+            {"type": "response.output_audio.delta", "delta": _audio(b"\x02")},
+        ]
+    )
+    session = _session(ws, sink, [], ringback=ring)
+
+    await session._receive()
+    await session._audio_out.put(None)
+    assert session._player is not None
+    await session._player
+
+    assert ring.stops == 1
+    assert sink.played == [b"\x01", b"\x02"]
+
+
+async def test_a_session_with_no_tone_still_plays() -> None:
+    """ringback is optional — the pipeline path owns its own."""
+    sink = _Sink()
+    ws = _WS([{"type": "response.output_audio.delta", "delta": _audio(b"\x01")}])
+    session = _session(ws, sink, [])
+
+    await session._receive()
+    await session._audio_out.put(None)
+    assert session._player is not None
+    await session._player
+
+    assert sink.played == [b"\x01"]
 
 
 async def test_the_old_event_name_still_works() -> None:

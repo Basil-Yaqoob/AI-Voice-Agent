@@ -162,6 +162,7 @@ async def _run_realtime(
         tools=agent.tools,
         sink=sink,
         publish=agent.publish,
+        ringback=agent.ringback,
     )
 
     # Held so the event loop cannot garbage-collect a switch mid-flight.

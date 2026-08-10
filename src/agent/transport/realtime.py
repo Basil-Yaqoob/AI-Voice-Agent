@@ -99,6 +99,7 @@ class RealtimeSession:
         tools: ToolRegistry,
         sink: Any,
         publish: Callable[[dict[str, Any]], Awaitable[None]],
+        ringback: Any = None,
     ) -> None:
         self._api_key = api_key
         self._model = model
@@ -107,6 +108,7 @@ class RealtimeSession:
         self._tools = tools
         self._sink = sink
         self._publish = publish
+        self._ringback = ringback
 
         self._ws: Any = None
         self._audio_out: asyncio.Queue[bytes | None] = asyncio.Queue()
@@ -149,7 +151,13 @@ class RealtimeSession:
         async with await self._open() as ws:
             self._ws = ws
             await self._configure()
-            self._player = asyncio.create_task(self._play())
+
+            # Ring, rather than start playback, until there is something to
+            # play. The playback task takes the sink's lock for the whole call,
+            # so it cannot start first — and the second and a half before the
+            # model's first audio is exactly the silence the tone is for.
+            if self._ringback is not None:
+                self._ringback.start()
 
             # Pump before greeting: _greet waits for the subscription to
             # settle, and awaiting it here would leave the caller's audio
@@ -162,6 +170,8 @@ class RealtimeSession:
             finally:
                 for task in (pump, recv, greeting):
                     task.cancel()
+                if self._ringback is not None:
+                    await self._ringback.stop()
                 await self._audio_out.put(None)
                 if self._player is not None:
                     await asyncio.gather(self._player, return_exceptions=True)
@@ -273,6 +283,19 @@ class RealtimeSession:
         except Exception:
             log.exception("realtime_playback_failed")
 
+    async def _begin_playback(self) -> None:
+        """Hand the sink over from the ringing tone to the model, once.
+
+        Deliberately driven by the first audio delta rather than by a timer:
+        the tone should end when there is genuinely something to say, and no
+        fixed guess at how long the model takes survives a slow network.
+        """
+        if self._player is not None:
+            return
+        if self._ringback is not None:
+            await self._ringback.stop()
+        self._player = asyncio.create_task(self._play())
+
     def _drop_queued_audio(self) -> None:
         while not self._audio_out.empty():
             try:
@@ -292,11 +315,15 @@ class RealtimeSession:
             # response.output_audio.delta and this has to survive both.
             if kind.endswith("audio.delta"):
                 self._audio_out.put_nowait(base64.b64decode(event["delta"]))
+                await self._begin_playback()
 
             elif kind == "input_audio_buffer.speech_started":
                 # Barge-in. Drop what is queued and silence the line; the
                 # server stops generating on its own.
                 self._drop_queued_audio()
+                if self._ringback is not None:
+                    # A caller talking over the ringing tone has answered it.
+                    await self._ringback.stop()
                 await self._sink.stop()
 
             elif kind.endswith("input_audio_transcription.completed"):
