@@ -59,6 +59,16 @@ FALLBACK_PERSONA = "You are Acme's customer support agent, taking calls from Pak
 # hangs up.
 MAX_TOOL_ROUNDS = 3
 
+# Spoken the moment the call connects, before the caller says anything. Fixed
+# text rather than a model call: it has to be immediate, and there is nothing
+# for a model to decide about hello. Written in Urdu script including the
+# company name, because the voice reads Latin letters one at a time.
+GREETING_SETTLE_S = 1.0
+
+GREETING_URDU = (
+    "السلام علیکم، دواگو سے رابطہ کرنے کا شکریہ۔ میں آپ کی کیا مدد کر سکتا ہوں؟"
+)
+
 # What the demo page's voice picker is allowed to select. An allow-list rather
 # than a free string: the value arrives over the room data channel and is
 # handed straight to the TTS vendor, where a bad id fails mid-sentence.
@@ -160,6 +170,31 @@ class VoiceAgent:
         """
         if self._state.state is SessionState.IDLE:
             self._state.to(SessionState.LISTENING)
+
+    async def greet(self) -> None:
+        """Say hello before the caller has to.
+
+        A line that answers with silence gets "hello? hello?" and then a hang
+        up — the caller cannot tell a connected call from a dead one. The
+        realtime path gets this from the API; the pipeline has to do it here.
+
+        Failure is not fatal: a caller who hears no greeting can still be
+        helped, so a broken TTS at this moment must not end the call.
+        """
+        # See the note in transport/realtime.py: the far end has to finish
+        # subscribing or the opening syllables are played to nobody.
+        await asyncio.sleep(GREETING_SETTLE_S)
+        try:
+            await self._sink.play(
+                self._tts.synthesize(GREETING_URDU, voice=self._voice)
+            )
+        except Exception as exc:
+            log.warning("greeting_failed", detail=str(exc)[:200])
+            return
+        self._history.append(Message(role="assistant", content=GREETING_URDU))
+        await self._publish(
+            {"type": "transcript", "role": "agent", "text": GREETING_URDU, "final": True}
+        )
 
     def end(self) -> None:
         """Close the call. Legal from any state."""

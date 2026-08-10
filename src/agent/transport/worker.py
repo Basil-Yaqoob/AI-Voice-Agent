@@ -256,6 +256,7 @@ async def _run_call(
     # state machine from LISTENING, and a turn starting from IDLE is fatal.
     agent.begin()
     log.info("listening", track=track.sid, rate=stt.sample_rate)
+    await agent.greet()
 
     consume = asyncio.create_task(_consume(agent, transcripts))
     hangup = asyncio.create_task(disconnected.wait())

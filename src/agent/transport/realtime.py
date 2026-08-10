@@ -58,6 +58,13 @@ SAMPLE_RATE = 24_000
 # 180ms treats a pause before a phone number as the end of the sentence.
 _SILENCE_MS = 500
 
+# Publishing a track and the far end subscribing to it are separate steps, and
+# a browser negotiating WebRTC takes a moment. Greeting the instant the track
+# exists sends the first syllables into a subscription that is not up yet, and
+# the caller hears nothing at all — the failure looks exactly like a greeting
+# that never fired.
+_GREETING_SETTLE_S = 1.0
+
 
 class RealtimeSession:
     """One call, held open on a single websocket."""
@@ -165,6 +172,7 @@ class RealtimeSession:
         answers with silence gets "hello? hello?" and then a hang-up. The
         caller should hear who they have reached before they say anything.
         """
+        await asyncio.sleep(_GREETING_SETTLE_S)
         await self._send(
             {
                 "type": "response.create",
