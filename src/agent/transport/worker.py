@@ -35,6 +35,7 @@ Opening a stream per turn would make interruption impossible to hear.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 from livekit import rtc
@@ -133,6 +134,19 @@ async def _run_call(
 
     disconnected = asyncio.Event()
     room.on("participant_disconnected", lambda _p: disconnected.set())
+
+    # The demo page's voice picker sends a data message. Without this listener
+    # it sends into the void and the voice never changes, which reads as "the
+    # male voice is broken" rather than as a missing handler.
+    def _on_data(packet: Any) -> None:
+        try:
+            payload = json.loads(bytes(packet.data).decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            return
+        if payload.get("type") == "set_voice":
+            agent.set_voice(str(payload.get("voice", "")))
+
+    room.on("data_received", _on_data)
 
     async def frames() -> Any:
         """Raw PCM out of the room, until the caller hangs up."""

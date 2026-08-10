@@ -285,3 +285,74 @@ def test_the_worker_opens_the_call_before_listening() -> None:
     assert source.index("agent.begin()") < source.index("_consume(agent"), (
         "begin() must run before any transcript can be consumed"
     )
+
+
+async def test_two_turns_in_a_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bug the user hit: answers once or twice, then stops hearing you.
+
+    on_final moved the state to THINKING and nothing moved it back, so the
+    second utterance attempted THINKING -> THINKING, raised, and killed the
+    call. Every existing test ran exactly one turn.
+    """
+    from agent.pipeline.session import SessionState
+
+    agent = _agent(monkeypatch)
+    agent.begin()
+
+    async def noop_turn(*_a, **_k):
+        return None
+
+    # Drive the state exactly as a completed turn does, without the network.
+    for _ in range(3):
+        assert agent.state is SessionState.LISTENING
+        agent._state.to(SessionState.THINKING)
+        agent._return_to_listening()
+
+    assert agent.state is SessionState.LISTENING
+
+
+def test_return_to_listening_is_safe_from_listening(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LISTENING -> LISTENING is illegal too, so the guard matters after barge-in."""
+    from agent.pipeline.session import SessionState
+
+    agent = _agent(monkeypatch)
+    agent.begin()
+    agent._return_to_listening()
+    assert agent.state is SessionState.LISTENING
+
+
+def test_return_to_listening_leaves_a_terminated_call_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.pipeline.session import SessionState
+
+    agent = _agent(monkeypatch)
+    agent.begin()
+    agent.end()
+    agent._return_to_listening()
+    assert agent.state is SessionState.TERMINATED
+
+
+def test_only_known_voices_are_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The value arrives over the data channel and goes straight to the vendor."""
+    agent = _agent(monkeypatch)
+    before = agent._voice
+
+    agent.set_voice("ur-PK-AsadNeural")
+    assert agent._voice == "ur-PK-AsadNeural"
+
+    agent.set_voice("nonsense-voice")
+    assert agent._voice == "ur-PK-AsadNeural", "junk must not reach the TTS adapter"
+
+    agent.set_voice("")
+    assert agent._voice == "ur-PK-AsadNeural"
+    assert before != "nonsense-voice"
+
+
+def test_the_worker_listens_for_the_voice_picker() -> None:
+    """The page sends set_voice; without a listener the picker does nothing."""
+    from pathlib import Path
+
+    source = Path("src/agent/transport/worker.py").read_text(encoding="utf-8")
+    assert "data_received" in source
+    assert "set_voice" in source

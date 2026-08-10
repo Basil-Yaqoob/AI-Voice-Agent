@@ -17,3 +17,4 @@ eval/out/
 *.db-wal
 *.db-shm
 *.db.tmp
+voice-samples/

@@ -59,6 +59,14 @@ FALLBACK_PERSONA = "You are Acme's customer support agent, taking calls from Pak
 # hangs up.
 MAX_TOOL_ROUNDS = 3
 
+# What the demo page's voice picker is allowed to select. An allow-list rather
+# than a free string: the value arrives over the room data channel and is
+# handed straight to the TTS vendor, where a bad id fails mid-sentence.
+SELECTABLE_VOICES = frozenset({
+    "ur-PK-UzmaNeural",
+    "ur-PK-AsadNeural",
+})
+
 FALLBACK_CORPUS = """
 Acme sells prepaid internet packages across Pakistan.
 Delivery takes two to three working days in major cities, four to five elsewhere.
@@ -215,8 +223,14 @@ class VoiceAgent:
         except Exception as exc:
             log.warning("turn_failed", detail=str(exc))
             await self._speak_recovery(exc)
-            self._state.to(SessionState.LISTENING)
             return
+        finally:
+            # Every exit from a turn lands back on LISTENING. Without this the
+            # state stays THINKING, the next thing the caller says attempts
+            # THINKING -> THINKING, which is illegal, and the exception kills
+            # the call. The symptom is an agent that answers once or twice and
+            # then stops hearing you.
+            self._return_to_listening()
 
         if result is not None:
             metrics.mark_first_audio()
@@ -227,6 +241,17 @@ class VoiceAgent:
             )
             await self._publish({"type": "metrics", **metrics.as_log()})
             log.info(**metrics.as_log())
+
+    def _return_to_listening(self) -> None:
+        """Ready for the next turn, from wherever this one ended.
+
+        Guarded rather than a bare ``to(LISTENING)``: after a barge-in
+        ``on_speech_started`` has already moved the state, and LISTENING ->
+        LISTENING is illegal too. A terminated call stays terminated.
+        """
+        if self._state.state in (SessionState.LISTENING, SessionState.TERMINATED):
+            return
+        self._state.to(SessionState.LISTENING)
 
     async def _run_tools(self, result: Any) -> None:
         """Execute the tools the model asked for and put the answers in history.
@@ -279,8 +304,18 @@ class VoiceAgent:
             pass
 
     def set_voice(self, voice: str) -> None:
-        """Live voice switch for the demo A/B."""
+        """Live voice switch for the demo A/B.
+
+        Validated because this arrives over the room's data channel. An
+        unrecognised id is not rejected loudly — it would fail inside the TTS
+        adapter mid-sentence, which on a live call means silence — it is simply
+        ignored and logged.
+        """
+        if voice not in SELECTABLE_VOICES:
+            log.warning("unknown_voice_ignored", voice=voice[:40])
+            return
         self._voice = voice
+        log.info("voice_changed", voice=voice)
 
     @staticmethod
     def caller_phone_from(participant: Any) -> str | None:
