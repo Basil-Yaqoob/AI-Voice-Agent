@@ -19,6 +19,7 @@ dropped is one frame.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 
 from livekit import rtc
@@ -49,6 +50,11 @@ class LiveKitSink:
         )
         self._track = rtc.LocalAudioTrack.create_audio_track("agent", self._source)
         self._playing = False
+        # One utterance at a time. Two coroutines pushing into one AudioSource
+        # — the opening greeting and the first reply, say — corrupts it and
+        # raises "InvalidState - failed to capture frame", which surfaces as a
+        # failed turn rather than as anything to do with audio.
+        self._lock = asyncio.Lock()
         # Odd byte counts cannot happen mid-stream, but a chunk boundary can
         # land inside a sample. Carry the stray byte to the next frame rather
         # than dropping it, which would invert the sign of everything after.
@@ -68,19 +74,20 @@ class LiveKitSink:
 
     async def play(self, chunks: AsyncIterator[bytes]) -> None:
         """Stream PCM into the room until the source is exhausted or cancelled."""
-        self._playing = True
-        self._remainder = b""
-        try:
-            async for chunk in chunks:
-                if not chunk:
-                    continue
-                data = self._remainder + chunk
-                usable = len(data) - (len(data) % _BYTES_PER_SAMPLE)
-                self._remainder = data[usable:]
-                if usable:
-                    await self._source.capture_frame(self._frame(data[:usable]))
-        finally:
-            self._playing = False
+        async with self._lock:
+            self._playing = True
+            self._remainder = b""
+            try:
+                async for chunk in chunks:
+                    if not chunk:
+                        continue
+                    data = self._remainder + chunk
+                    usable = len(data) - (len(data) % _BYTES_PER_SAMPLE)
+                    self._remainder = data[usable:]
+                    if usable:
+                        await self._source.capture_frame(self._frame(data[:usable]))
+            finally:
+                self._playing = False
 
     async def stop(self) -> None:
         """Silence the line now. Called on barge-in, so it must be immediate."""

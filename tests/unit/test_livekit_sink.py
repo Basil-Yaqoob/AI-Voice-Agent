@@ -9,6 +9,7 @@ The LiveKit types are faked so this runs without a room.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import sys
 import types
 from collections.abc import AsyncIterator, Iterator
@@ -356,3 +357,33 @@ def test_the_worker_listens_for_the_voice_picker() -> None:
     source = Path("src/agent/transport/worker.py").read_text(encoding="utf-8")
     assert "data_received" in source
     assert "set_voice" in source
+
+
+async def test_concurrent_playback_is_serialised() -> None:
+    """Two coroutines pushing into one AudioSource corrupts it.
+
+    The opening greeting and the first reply can overlap — the greeting runs
+    off the critical path so it does not hold up the microphone — and without
+    a lock LiveKit raises "InvalidState - failed to capture frame", which
+    surfaces as a failed turn with nothing pointing at audio.
+    """
+    sink = _sink()
+    order: list[str] = []
+
+    async def slow(tag: bytes) -> AsyncIterator[bytes]:
+        for _ in range(3):
+            await asyncio.sleep(0)
+            yield tag * 2
+
+    async def run(tag: bytes, name: str) -> None:
+        await sink.play(slow(tag))
+        order.append(name)
+
+    await asyncio.gather(run(b"\x01", "first"), run(b"\x02", "second"))
+
+    # All of one utterance's frames land before any of the other's: the tag
+    # sequence must change exactly once rather than alternate.
+    tags = [f.data[:1] for f in sink._source.frames]
+    switches = sum(1 for a, b in itertools.pairwise(tags) if a != b)
+    assert switches == 1, f"utterances interleaved: {tags}"
+    assert len(order) == 2

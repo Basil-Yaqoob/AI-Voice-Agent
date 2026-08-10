@@ -105,14 +105,17 @@ class RealtimeSession:
             self._ws = ws
             await self._configure()
             self._player = asyncio.create_task(self._play())
-            await self._greet()
 
+            # Pump before greeting: _greet waits for the subscription to
+            # settle, and awaiting it here would leave the caller's audio
+            # unsent for that second.
             pump = asyncio.create_task(self._send_audio(frames))
             recv = asyncio.create_task(self._receive())
+            greeting = asyncio.create_task(self._greet())
             try:
                 await asyncio.wait({pump, recv}, return_when=asyncio.FIRST_COMPLETED)
             finally:
-                for task in (pump, recv):
+                for task in (pump, recv, greeting):
                     task.cancel()
                 await self._audio_out.put(None)
                 if self._player is not None:

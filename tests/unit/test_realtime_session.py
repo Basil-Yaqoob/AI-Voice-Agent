@@ -286,5 +286,5 @@ def test_the_greeting_asks_for_the_urdu_spelling() -> None:
     from agent.transport import realtime
 
     source = Path(realtime.__file__).read_text(encoding="utf-8")
-    greeting = source.split("_greet")[2]
-    assert "دواگو" in greeting
+    body = source.split("async def _greet", 1)[1].split("async def ", 1)[0]
+    assert "دواگو" in body

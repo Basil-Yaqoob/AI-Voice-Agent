@@ -199,3 +199,30 @@ In parallel from day one, and not blocked by any code: start the **carrier conve
 - **TASK-06 (Urdu normalisation) is small and disproportionately important.** It is where competing demos visibly fail — a phone number read as a multi-crore cardinal. It is pure string functions, so it is also the easiest thing in the project to test properly.
 - **The 800ms budget is the spine.** Every time you are tempted to add a layer, price it against the budget first. That single discipline is what separates this from the demos the client has already been shown.
 - **Do not let the carrier work drift.** It is the only item here that software effort cannot accelerate, and it is the most likely cause of a missed launch date.
+
+---
+
+## Open bug — Uplift/pipeline mode fails on the reply (10 Aug 2026)
+
+`VOICE_MODE=pipeline` with `TTS_PROVIDER=uplift` greets correctly and hears the
+caller correctly — the user transcript arrives — but the **answer** fails with:
+
+```
+turn_failed: an RtcError occurred: InvalidState - failed to capture frame
+```
+
+The greeting plays fine through the same sink and the same provider moments
+earlier, so it is not the vendor, the voice id or the sample rate. Serialising
+`LiveKitSink.play()` behind a lock did not fix it, which rules out the simplest
+explanation (greeting and reply pushing into one `AudioSource` concurrently).
+
+Next things to try, roughly in order:
+1. Whether `AudioSource.capture_frame` rejects frames after `clear_queue()` has
+   been called on it — `stop()` runs on every barge-in check.
+2. Whether the greeting task being cancelled mid-`play()` leaves the source in
+   a state the next `play()` cannot use.
+3. Logging the source's own state around the failure rather than inferring it.
+
+**`VOICE_MODE=realtime` is unaffected and is what the demo currently runs.**
+Verified working end to end after this bug appeared: greeting, transcript,
+tool call, and a correct answer quoting 328 packs.

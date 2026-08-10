@@ -256,14 +256,19 @@ async def _run_call(
     # state machine from LISTENING, and a turn starting from IDLE is fatal.
     agent.begin()
     log.info("listening", track=track.sid, rate=stt.sample_rate)
-    await agent.greet()
 
+    # Consumer first, greeting second, and the greeting off the critical path.
+    # stt.stream() is a lazy generator: nothing pulls from frames() until
+    # _consume starts iterating it, so awaiting a multi-second greeting here
+    # left the caller's microphone unread for the whole of it — they spoke and
+    # the agent heard nothing, with no transcript to show why.
     consume = asyncio.create_task(_consume(agent, transcripts))
+    greeting = asyncio.create_task(agent.greet())
     hangup = asyncio.create_task(disconnected.wait())
     try:
         await asyncio.wait({consume, hangup}, return_when=asyncio.FIRST_COMPLETED)
     finally:
-        for task in (consume, hangup):
+        for task in (consume, greeting, hangup):
             task.cancel()
         # Surface a crash in the consumer rather than swallowing it in cleanup.
         if consume.done() and not consume.cancelled():
