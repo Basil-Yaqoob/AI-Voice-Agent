@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     # ~200ms per synthesis, which is most of the 110ms TTS budget.
     azure_speech_region: str = "southeastasia"
     inworld_api_key: SecretStr = SecretStr("")
+    # Upliftai — a Pakistani TTS vendor with native Urdu voices.
+    uplift_api_key: SecretStr = SecretStr("")
     # The realtime path talks to OpenAI directly. Falls back to the OpenRouter
     # key so a setup that points that adapter at api.openai.com already works.
     openai_api_key: SecretStr = SecretStr("")

@@ -278,7 +278,7 @@ def test_the_persona_spells_the_company_name_in_urdu() -> None:
     """
     from agent.language.personas import DVAGO_PERSONA
 
-    assert "ڈی واگو" in DVAGO_PERSONA
+    assert "دواگو" in DVAGO_PERSONA
 
 
 def test_the_greeting_asks_for_the_urdu_spelling() -> None:
@@ -287,4 +287,4 @@ def test_the_greeting_asks_for_the_urdu_spelling() -> None:
 
     source = Path(realtime.__file__).read_text(encoding="utf-8")
     greeting = source.split("_greet")[2]
-    assert "ڈی واگو" in greeting
+    assert "دواگو" in greeting

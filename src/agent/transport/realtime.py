@@ -172,7 +172,7 @@ class RealtimeSession:
                     "instructions": (
                         "Greet the caller now, before they have said "
                         "anything. One short sentence of natural Urdu: thank "
-                        "them for calling ڈی واگو (write the name in Urdu "
+                        "them for calling دواگو (write the name in Urdu "
                         "script exactly like that, never as Latin 'DVAGO') "
                         "and ask how you can help. Do not call any tool and "
                         "do not mention the caller by name yet."
