@@ -44,7 +44,16 @@ from websockets.asyncio.client import connect
 from agent.telemetry.logging import get_logger
 from agent.tools.registry import ToolRegistry
 
-__all__ = ["RealtimeSession"]
+__all__ = ["RealtimeSession", "RealtimeUnavailable"]
+
+
+class RealtimeUnavailable(RuntimeError):
+    """The socket to OpenAI could not be opened, so there is no agent at all.
+
+    Distinct from any other failure because it is the one the operator can act
+    on — it means the network, not the code. The pipeline path (``VOICE_MODE=
+    pipeline``) does not depend on this host.
+    """
 
 log = get_logger(__name__)
 
@@ -57,6 +66,17 @@ SAMPLE_RATE = 24_000
 # Server-side endpointing. 500ms for the same reason the Deepgram path uses it:
 # 180ms treats a pause before a phone number as the end of the sentence.
 _SILENCE_MS = 500
+
+# Opening the socket to OpenAI is the one step with nothing behind it: until it
+# succeeds the caller is on a live line with no agent on the other end. From
+# Pakistan the connection is not reliably fast — observed here, two calls in a
+# row died in DNS resolution for api.openai.com and the caller heard ten seconds
+# of nothing before the call dropped. So: a short timeout and try again, rather
+# than one long wait that spends the caller's patience on a single attempt.
+# Three attempts at 4s is inside the window a caller will hold for; the default
+# 10s single attempt is not.
+_CONNECT_TIMEOUT_S = 4.0
+_CONNECT_ATTEMPTS = 3
 
 # Publishing a track and the far end subscribing to it are separate steps, and
 # a browser negotiating WebRTC takes a moment. Greeting the instant the track
@@ -95,13 +115,38 @@ class RealtimeSession:
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
+    async def _open(self) -> Any:
+        """Open the socket, retrying briefly rather than hanging on one attempt."""
+        last: BaseException | None = None
+        for attempt in range(1, _CONNECT_ATTEMPTS + 1):
+            started = asyncio.get_running_loop().time()
+            try:
+                return await connect(
+                    f"{_URL}?model={self._model}",
+                    additional_headers={"Authorization": f"Bearer {self._api_key}"},
+                    max_size=None,
+                    open_timeout=_CONNECT_TIMEOUT_S,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                last = exc
+                log.warning(
+                    "realtime_connect_failed",
+                    attempt=attempt,
+                    of=_CONNECT_ATTEMPTS,
+                    elapsed_ms=round(
+                        (asyncio.get_running_loop().time() - started) * 1000
+                    ),
+                    detail=f"{type(exc).__name__}: {exc}"[:200],
+                )
+        raise RealtimeUnavailable(
+            f"could not reach {_URL} in {_CONNECT_ATTEMPTS} attempts"
+        ) from last
+
     async def run(self, frames: AsyncIterator[bytes]) -> None:
         """Hold the call open until the caller's audio stream ends."""
-        async with connect(
-            f"{_URL}?model={self._model}",
-            additional_headers={"Authorization": f"Bearer {self._api_key}"},
-            max_size=None,
-        ) as ws:
+        async with await self._open() as ws:
             self._ws = ws
             await self._configure()
             self._player = asyncio.create_task(self._play())

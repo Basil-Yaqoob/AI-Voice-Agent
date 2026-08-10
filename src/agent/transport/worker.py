@@ -192,7 +192,25 @@ async def _run_realtime(
         for task in (call, hangup):
             task.cancel()
         if call.done() and not call.cancelled():
-            call.result()
+            try:
+                call.result()
+            except realtime_module.RealtimeUnavailable as exc:
+                # A live caller and no agent behind it. Say so on the page:
+                # otherwise this is indistinguishable from a working call that
+                # nobody is speaking into, and the last one of these cost an
+                # afternoon of looking at the wrong layer.
+                log.error("realtime_unreachable", detail=str(exc))
+                await agent.publish(
+                    {
+                        "type": "error",
+                        "text": (
+                            "Could not reach the OpenAI realtime API. The network "
+                            "path to api.openai.com is failing — the call is up but "
+                            "there is no agent on it. Try again, or run "
+                            "VOICE_MODE=pipeline."
+                        ),
+                    }
+                )
 
 
 async def _run_call(

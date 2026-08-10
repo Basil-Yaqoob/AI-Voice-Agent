@@ -288,3 +288,78 @@ def test_the_greeting_asks_for_the_urdu_spelling() -> None:
     source = Path(realtime.__file__).read_text(encoding="utf-8")
     body = source.split("async def _greet", 1)[1].split("async def ", 1)[0]
     assert "دواگو" in body
+
+
+# ── reaching OpenAI at all ───────────────────────────────────────────────────
+#
+# The bug these guard: two of three calls from Pakistan died in DNS resolution
+# for api.openai.com. websockets waits ten seconds by default, so the caller
+# sat on a connected line hearing nothing and then got hung up on, and the only
+# trace was a TimeoutError in the worker log. Neither the page nor the caller
+# was told anything.
+
+
+async def test_the_socket_is_retried_before_giving_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.transport import realtime as module
+
+    attempts: list[float | None] = []
+
+    async def flaky(_url: str, **kwargs: Any) -> str:
+        attempts.append(kwargs.get("open_timeout"))
+        if len(attempts) < 3:
+            raise TimeoutError("timed out during opening handshake")
+        return "socket"
+
+    monkeypatch.setattr(module, "connect", flaky)
+    session = _session(_WS([]), _Sink(), [])
+
+    assert await session._open() == "socket"
+    assert len(attempts) == 3, "a transient DNS failure must not end the call"
+
+
+async def test_each_attempt_is_shorter_than_the_default_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Three quick tries beat one ten-second one: the caller is on the line."""
+    from agent.transport import realtime as module
+
+    seen: list[float | None] = []
+
+    async def record(_url: str, **kwargs: Any) -> str:
+        seen.append(kwargs.get("open_timeout"))
+        return "socket"
+
+    monkeypatch.setattr(module, "connect", record)
+    await _session(_WS([]), _Sink(), [])._open()
+
+    assert seen[0] is not None and seen[0] <= 5.0
+    assert module._CONNECT_TIMEOUT_S * module._CONNECT_ATTEMPTS <= 15.0
+
+
+async def test_an_unreachable_api_is_named_as_such(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A distinct type, because the operator's action differs.
+
+    Every other failure means fix the code. This one means the network to
+    api.openai.com is down and VOICE_MODE=pipeline does not go through it.
+    """
+    from agent.transport import realtime as module
+
+    async def dead(_url: str, **_kwargs: Any) -> str:
+        raise OSError("getaddrinfo failed")
+
+    monkeypatch.setattr(module, "connect", dead)
+    session = _session(_WS([]), _Sink(), [])
+
+    with pytest.raises(module.RealtimeUnavailable):
+        await session._open()
+
+
+async def test_the_worker_tells_the_page_there_is_no_agent() -> None:
+    """Silence on a connected call is indistinguishable from a working one."""
+    source = Path("src/agent/transport/worker.py").read_text(encoding="utf-8")
+    assert "RealtimeUnavailable" in source
+    assert '"type": "error"' in source, "the failure has to reach the browser"

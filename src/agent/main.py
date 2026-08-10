@@ -35,6 +35,7 @@ from agent.pipeline.interrupt import InterruptController
 from agent.pipeline.session import SessionState, StateMachine
 from agent.pipeline.turn import TurnRunner
 from agent.providers.registry import build_llm, build_stt, build_tts
+from agent.providers.voices import ALL_VOICE_IDS
 from agent.telemetry.logging import configure_logging, get_logger
 from agent.telemetry.metrics import TurnMetrics
 from agent.tools.demo_backend import build_demo_registry
@@ -71,21 +72,9 @@ GREETING_URDU = (
 
 # What the demo page's voice picker is allowed to select. An allow-list rather
 # than a free string: the value arrives over the room data channel and is
-# handed straight to the TTS vendor, where a bad id fails mid-sentence.
-SELECTABLE_VOICES = frozenset({
-    # Realtime (VOICE_MODE=realtime)
-    "marin",
-    "cedar",
-    "alloy",
-    "shimmer",
-    # Azure ur-PK (VOICE_MODE=pipeline)
-    "ur-PK-UzmaNeural",
-    "ur-PK-AsadNeural",
-    # Upliftai (VOICE_MODE=pipeline, TTS_PROVIDER=uplift)
-    "broadband-support",
-    "helpdesk-agent",
-    "female-narrator",
-})
+# handed straight to the TTS vendor, where a bad id fails mid-sentence. The
+# catalogue lives in providers.voices because the control plane needs it too.
+SELECTABLE_VOICES = ALL_VOICE_IDS
 
 FALLBACK_CORPUS = """
 Acme sells prepaid internet packages across Pakistan.

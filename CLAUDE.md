@@ -62,6 +62,8 @@ output_config={"effort": "low"}    # low | medium — never high
 - Any timestamp/session-id in the cached system prompt kills prompt caching → **3× the model bill, no visible symptom.** Watch `cache_read_tokens`.
 - Pakistani phone numbers must be read **digit-by-digit**, never as a cardinal.
 - Azure Speech SDK is **synchronous** — needs `run_in_executor` or every concurrent call stutters.
+- Never hand a TTS chunk straight to `AudioSource.capture_frame`. It rejects a frame that cannot fit beside what is already queued (`InvalidState - failed to capture frame`), and Uplift's raw HTTP chunks are ~64KB. `LiveKitSink` re-cuts to 20ms — keep it that way.
+- Deepgram closes with 1011 after ~10s of no audio, which ends the call. Silence suppression makes that routine, hence the KeepAlive.
 - Azure region must be `southeastasia`, not a US region (~200ms difference).
 - After barge-in, record what was **spoken**, not what was intended.
 - Railway has no India region — fine for control plane, never for media workers.

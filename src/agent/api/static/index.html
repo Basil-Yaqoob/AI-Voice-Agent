@@ -80,28 +80,14 @@
         <option value="">Unknown number — new customer</option>
       </select>
       <label for="voice">Voice</label>
-      <select id="voice">
-        <optgroup label="Uplift — Pakistani voices (TTS_PROVIDER=uplift)">
-          <option value="broadband-support">Broadband Support</option>
-          <option value="helpdesk-agent">Helpdesk Agent</option>
-          <option value="female-narrator">Female Narrator</option>
-        </optgroup>
-        <optgroup label="OpenAI Realtime (VOICE_MODE=realtime)">
-          <option value="cedar">Cedar (male)</option>
-          <option value="marin">Marin (female)</option>
-          <option value="alloy">Alloy (neutral)</option>
-          <option value="shimmer">Shimmer (female)</option>
-        </optgroup>
-        <optgroup label="Azure ur-PK (TTS_PROVIDER=azure)">
-          <option value="ur-PK-UzmaNeural">Uzma (female)</option>
-          <option value="ur-PK-AsadNeural">Asad (male)</option>
-        </optgroup>
-      </select>
+      <!-- Filled from /api/config: only the running mode's voices are offered,
+           because a voice id from another vendor silently does nothing. -->
+      <select id="voice"></select>
     </div>
     <p class="error" id="error" hidden></p>
     <p class="note">Caller stands in for the number a phone call would assert — it decides
-       whose orders the agent can see. Voice ids belong to one vendor: pick from the group
-       matching the running mode, or the agent keeps the voice it started with.</p>
+       whose orders the agent can see. The voice list shows only what
+       <span id="engine">the running engine</span> can speak.</p>
   </div>
 
   <div class="panel">

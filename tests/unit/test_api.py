@@ -169,3 +169,44 @@ def test_ui_failures_cannot_drop_the_call() -> None:
     """Transcript rendering is best-effort; a malformed frame must be swallowed."""
     js = Path("src/agent/api/static/app.js").read_text(encoding="utf-8")
     assert "try {" in js and "JSON.parse" in js
+
+
+# ── voice list ───────────────────────────────────────────────────────────────
+#
+# The page used to hard-code all three vendors' voices and hope the operator
+# knew which group was live. Selecting a foreign id does nothing at all, with
+# no error in the browser or on the wire, so the picker looked broken. The
+# server is the only side that knows the mode, so it says.
+
+
+def test_config_offers_only_the_running_engine_voices() -> None:
+    realtime = TestClient(create_app(_settings(voice_mode="realtime")))
+    body = realtime.get("/api/config").json()
+    assert body["voice_mode"] == "realtime"
+    assert {v["id"] for v in body["voices"]} == {"cedar", "marin", "alloy", "shimmer"}
+
+
+def test_config_follows_the_tts_provider_in_pipeline_mode() -> None:
+    uplift = TestClient(
+        create_app(_settings(voice_mode="pipeline", tts_provider="uplift"))
+    )
+    ids = {v["id"] for v in uplift.get("/api/config").json()["voices"]}
+    assert ids == {"broadband-support", "helpdesk-agent", "female-narrator"}
+    assert "cedar" not in ids
+
+
+def test_config_default_voice_is_one_of_the_offered_ones() -> None:
+    """Otherwise the picker opens on a value the engine cannot speak."""
+    for kw in (
+        {"voice_mode": "realtime"},
+        {"voice_mode": "pipeline", "tts_provider": "uplift"},
+        {"voice_mode": "pipeline", "tts_provider": "azure"},
+    ):
+        body = TestClient(create_app(_settings(**kw))).get("/api/config").json()
+        assert body["default_voice"] in {v["id"] for v in body["voices"]}, kw
+
+
+def test_config_leaks_no_credentials(client: TestClient) -> None:
+    raw = json.dumps(client.get("/api/config").json())
+    assert SECRET not in raw
+    assert "api_key" not in raw

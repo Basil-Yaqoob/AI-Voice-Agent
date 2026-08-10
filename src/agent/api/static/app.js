@@ -17,6 +17,7 @@ const els = {
   breakdown: document.getElementById('breakdown'),
   transcript: document.getElementById('transcript'),
   placeholder: document.getElementById('placeholder'),
+  engine: document.getElementById('engine'),
 };
 
 const BUDGET_MS = 800;
@@ -76,6 +77,13 @@ function onData(payload) {
   if (msg.type === 'transcript' && msg.final) appendMessage(msg.role, msg.text);
   if (msg.type === 'metrics' && msg.first_audio_ms) showMetrics(msg);
   if (msg.type === 'state') setState(msg.state, 'live');
+  // A call can be connected and still have nothing behind it — the socket to
+  // the model failed. Silence looks identical to a working line nobody is
+  // talking on, so the worker says so explicitly and it goes on screen.
+  if (msg.type === 'error') {
+    showError(msg.text);
+    setState('no agent', 'err');
+  }
 }
 
 async function connect() {
@@ -169,6 +177,39 @@ async function connect() {
 async function disconnect() {
   if (room) await room.disconnect();
 }
+
+/* The voice list comes from the server, which is the only side that knows
+ * which mode is running. Hard-coding all three vendors here meant the picker
+ * usually pointed at a voice the running engine had never heard of, and
+ * selecting it did nothing with no error anywhere. */
+async function loadConfig() {
+  try {
+    const res = await fetch('/api/config');
+    if (!res.ok) throw new Error(res.status);
+    const cfg = await res.json();
+
+    els.voice.textContent = '';
+    const group = document.createElement('optgroup');
+    group.label = (cfg.voices[0] && cfg.voices[0].vendor) || 'Voices';
+    cfg.voices.forEach((v) => {
+      const opt = document.createElement('option');
+      opt.value = v.id;
+      opt.textContent = v.label;
+      if (v.id === cfg.default_voice) opt.selected = true;
+      group.appendChild(opt);
+    });
+    els.voice.appendChild(group);
+    els.voice.disabled = cfg.voices.length === 0;
+    if (els.engine) els.engine.textContent = cfg.engine;
+  } catch (e) {
+    // A missing list must not block the demo: the call still works on the
+    // voice the worker started with.
+    els.voice.disabled = true;
+    if (els.engine) els.engine.textContent = 'the running engine';
+  }
+}
+
+loadConfig();
 
 els.connect.addEventListener('click', () => (room ? disconnect() : connect()));
 

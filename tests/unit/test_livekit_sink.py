@@ -86,8 +86,41 @@ async def _chunks(*items: bytes) -> AsyncIterator[bytes]:
 async def test_pcm_reaches_the_source() -> None:
     sink = _sink()
     await sink.play(_chunks(b"\x01\x02" * 100, b"\x03\x04" * 100))
-    assert len(sink._source.frames) == 2
+    written = b"".join(f.data for f in sink._source.frames)
+    assert written == b"\x01\x02" * 100 + b"\x03\x04" * 100
     assert sink._source.frames[0].sample_rate == 24_000
+
+
+async def test_a_large_chunk_is_cut_into_frames() -> None:
+    """The Uplift bug, in one assertion.
+
+    Azure and the realtime API yield 20-40ms chunks, so pushing each chunk as
+    a single frame worked by luck. Uplift streams the raw HTTP body in chunks
+    of tens of kilobytes, and LiveKit rejects a frame that cannot fit beside
+    what is already queued: "InvalidState - failed to capture frame", raised on
+    the second chunk while the first is still playing. It reached the user as a
+    failed turn — the greeting played, the reply never did.
+    """
+    sink = _sink(22_050)
+    body = bytes(range(256)) * 256  # 64KB, the size httpx actually delivers
+    await sink.play(_chunks(body, body))
+
+    assert b"".join(f.data for f in sink._source.frames) == body * 2
+    assert all(len(f.data) <= sink.frame_bytes for f in sink._source.frames), (
+        "a frame larger than the queue is what LiveKit refuses"
+    )
+
+
+async def test_frames_are_one_audio_period_long() -> None:
+    """20ms at the source's own rate, not at some rate hard-coded here.
+
+    Uplift emits 22.05kHz where Azure emits 24kHz; a fixed byte count would
+    play one of them at the wrong speed.
+    """
+    for rate, expected in ((24_000, 480), (22_050, 441), (16_000, 320)):
+        sink = _sink(rate)
+        await sink.play(_chunks(b"\x00\x01" * expected * 3))
+        assert [f.samples_per_channel for f in sink._source.frames] == [expected] * 3
 
 
 async def test_samples_per_channel_matches_the_byte_count() -> None:

@@ -85,6 +85,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             identity=identity,
         )
 
+    @app.get("/api/config")
+    async def config() -> dict[str, object]:
+        """What the page needs to render itself honestly.
+
+        Chiefly the voice list. Offering all three vendors at once and letting
+        the operator work out which group is live means the picker silently
+        does nothing most of the time — a foreign voice id is either rejected
+        by the vendor or ignored, and neither is visible from the browser.
+        """
+        from agent.providers.voices import selectable_for
+
+        s = _settings()
+        voices = selectable_for(s.voice_mode, s.tts_provider)
+        return {
+            "voice_mode": s.voice_mode,
+            "engine": s.realtime_model if s.voice_mode == "realtime" else s.tts_provider,
+            "default_voice": s.realtime_voice if s.voice_mode == "realtime" else s.default_voice,
+            "voices": [{"id": v.id, "label": v.label, "vendor": v.vendor} for v in voices],
+        }
+
     @app.get("/health")
     async def health() -> dict[str, object]:
         """Liveness only.

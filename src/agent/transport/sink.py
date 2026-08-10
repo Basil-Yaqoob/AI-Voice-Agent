@@ -11,10 +11,18 @@ out, so the caller carries on hearing an agent they interrupted a second ago,
 which is the exact failure barge-in exists to prevent. ``clear_queue()`` is
 what actually silences the line, and it is the first thing ``stop()`` does.
 
-**Frames are pushed at their natural size, not buffered up.** The TTS adapter
-already yields 20-40ms chunks for a reason: a larger buffer here would improve
-nothing and make cancellation coarser, because the smallest unit that can be
-dropped is one frame.
+**PCM is re-cut into fixed 20ms frames, whatever size it arrives in.** This is
+not tidiness. ``AudioSource.capture_frame`` rejects a frame that cannot fit
+alongside what is already queued, and it reports that as ``RtcError
+InvalidState - failed to capture frame`` — which surfaces as a failed turn with
+nothing in it pointing at audio. Azure and the realtime API happen to yield
+20-40ms chunks, so pushing each chunk as one frame worked by luck; Uplift
+streams the raw HTTP body, whose chunks are tens of kilobytes, and the *second*
+one is rejected while the first is still playing. Re-cutting removes the
+dependency on how a vendor happens to flush its socket.
+
+Fixed frames also make ``capture_frame`` pace itself against real playout,
+which is what keeps ``is_playing`` honest and barge-in accurate to one frame.
 """
 
 from __future__ import annotations
@@ -39,6 +47,11 @@ _CHANNELS = 1
 # buffer only adds latency between clear_queue() and actual silence.
 _QUEUE_MS = 200
 
+# One frame of audio. 20ms is the usual WebRTC unit and comfortably below the
+# queue, so a frame always has somewhere to go; it is also the granularity at
+# which barge-in can cut, which is why it is not larger.
+_FRAME_MS = 20
+
 
 class LiveKitSink:
     """Publishes one audio track and writes PCM into it."""
@@ -55,10 +68,7 @@ class LiveKitSink:
         # raises "InvalidState - failed to capture frame", which surfaces as a
         # failed turn rather than as anything to do with audio.
         self._lock = asyncio.Lock()
-        # Odd byte counts cannot happen mid-stream, but a chunk boundary can
-        # land inside a sample. Carry the stray byte to the next frame rather
-        # than dropping it, which would invert the sign of everything after.
-        self._remainder = b""
+        self._frame_bytes = int(sample_rate * _FRAME_MS / 1000) * _BYTES_PER_SAMPLE * _CHANNELS
 
     @property
     def track(self) -> rtc.LocalAudioTrack:
@@ -76,16 +86,30 @@ class LiveKitSink:
         """Stream PCM into the room until the source is exhausted or cancelled."""
         async with self._lock:
             self._playing = True
-            self._remainder = b""
+            # Local, not instance state: an utterance that ends mid-frame must
+            # not prepend its tail to the next one, which would arrive a
+            # sentence late and one byte out of phase.
+            pending = bytearray()
             try:
                 async for chunk in chunks:
                     if not chunk:
                         continue
-                    data = self._remainder + chunk
-                    usable = len(data) - (len(data) % _BYTES_PER_SAMPLE)
-                    self._remainder = data[usable:]
-                    if usable:
-                        await self._source.capture_frame(self._frame(data[:usable]))
+                    pending += chunk
+                    sent = 0
+                    while len(pending) - sent >= self._frame_bytes:
+                        end = sent + self._frame_bytes
+                        await self._source.capture_frame(self._frame(pending[sent:end]))
+                        sent = end
+                    # One trim per chunk rather than one per frame: repeated
+                    # slicing of a 64KB buffer is quadratic, on the hot path.
+                    del pending[:sent]
+                # The tail is shorter than a frame but still real audio — the
+                # last syllable of the sentence. A chunk boundary can land
+                # inside a sample, so any stray odd byte goes rather than
+                # inverting the sign of the frame it would have started.
+                tail = bytes(pending[: len(pending) - (len(pending) % _BYTES_PER_SAMPLE)])
+                if tail:
+                    await self._source.capture_frame(self._frame(tail))
             finally:
                 self._playing = False
 
@@ -100,7 +124,12 @@ class LiveKitSink:
     def is_playing(self) -> bool:
         return self._playing
 
-    def _frame(self, pcm: bytes) -> rtc.AudioFrame:
+    @property
+    def frame_bytes(self) -> int:
+        return self._frame_bytes
+
+    def _frame(self, pcm: bytes | bytearray) -> rtc.AudioFrame:
+        pcm = bytes(pcm)
         return rtc.AudioFrame(
             data=pcm,
             sample_rate=self._sample_rate,

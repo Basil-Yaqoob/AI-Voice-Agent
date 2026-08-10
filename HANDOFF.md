@@ -202,27 +202,40 @@ In parallel from day one, and not blocked by any code: start the **carrier conve
 
 ---
 
-## Open bug — Uplift/pipeline mode fails on the reply (10 Aug 2026)
+## Fixed 10 Aug 2026 — three bugs found by running both modes end to end
 
-`VOICE_MODE=pipeline` with `TTS_PROVIDER=uplift` greets correctly and hears the
-caller correctly — the user transcript arrives — but the **answer** fails with:
+Both `VOICE_MODE=realtime` and `VOICE_MODE=pipeline` + `TTS_PROVIDER=uplift`
+are now verified end to end: greeting, caller transcript, tool call, and a
+correct answer quoting 328 packs from the database.
 
-```
-turn_failed: an RtcError occurred: InvalidState - failed to capture frame
-```
+**1. Uplift replies died with `InvalidState - failed to capture frame`.**
+Not the vendor, the voice id or the sample rate, and not the concurrency it
+looked like — serialising `play()` behind a lock changed nothing. `LiveKitSink`
+pushed each chunk the provider yielded as one `AudioFrame`, and
+`AudioSource.capture_frame` **rejects a frame that cannot fit beside what is
+already queued**. Azure and the realtime API happen to yield 20-40ms chunks, so
+this worked by luck for two years of the project's life; Uplift streams the raw
+HTTP body, whose chunks are tens of kilobytes, and the *second* one is refused
+while the first is still playing. That is why the short greeting survived and
+the longer reply did not. The sink now re-cuts everything into 20ms frames, so
+no vendor's socket-flushing behaviour can reach LiveKit. Reproduced and fixed
+against the real `AudioSource`, not a fake.
 
-The greeting plays fine through the same sink and the same provider moments
-earlier, so it is not the vendor, the voice id or the sample rate. Serialising
-`LiveKitSink.play()` behind a lock did not fix it, which rules out the simplest
-explanation (greeting and reply pushing into one `AudioSource` concurrently).
+**2. Realtime calls died in `getaddrinfo` for `api.openai.com`.** Two of three
+of the user's calls, with the caller sitting on a connected line hearing
+nothing for the ten-second default timeout before being hung up on. The link
+from Pakistan is not reliably fast. Now three attempts at 4s, and a distinct
+`RealtimeUnavailable` that the worker reports to the page — a connected call
+with no agent behind it is otherwise indistinguishable from a working one.
+**If this recurs often, `VOICE_MODE=pipeline` does not touch that host.**
 
-Next things to try, roughly in order:
-1. Whether `AudioSource.capture_frame` rejects frames after `clear_queue()` has
-   been called on it — `stop()` runs on every barge-in check.
-2. Whether the greeting task being cancelled mid-`play()` leaves the source in
-   a state the next `play()` cannot use.
-3. Logging the source's own state around the failure rather than inferring it.
+**3. Deepgram closed the socket with 1011 whenever audio stopped for ~10s**,
+which ended the call. A browser applying silence suppression sends nothing
+while the caller is quiet, and a caller reading a number off a box is quiet for
+longer than that. `DeepgramSTT` now sends a KeepAlive on an idle socket.
 
-**`VOICE_MODE=realtime` is unaffected and is what the demo currently runs.**
-Verified working end to end after this bug appeared: greeting, transcript,
-tool call, and a correct answer quoting 328 packs.
+Also: the demo page listed all three vendors' voices at once and left the
+operator to know which group was live. Selecting a foreign voice id does
+nothing — no error in the browser, none on the wire — so the picker looked
+broken. The page now builds its list from `/api/config`, which offers only what
+the running mode can speak.
