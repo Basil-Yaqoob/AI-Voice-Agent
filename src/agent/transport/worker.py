@@ -93,6 +93,12 @@ async def entrypoint(ctx: JobContext) -> None:
         database=database,
     )
 
+    # The pipeline can switch voice mid-call; realtime cannot, so both take it
+    # from the token and the page behaves the same way in either mode.
+    chosen = _requested_voice(participant)
+    if chosen:
+        agent.set_voice(chosen)
+
     try:
         if realtime:
             await _run_realtime(agent, settings, ctx.room, participant, sink)
@@ -147,10 +153,11 @@ async def _run_realtime(
         finally:
             await audio.aclose()
 
+    voice = _requested_voice(participant) or settings.realtime_voice
     session = realtime_module.RealtimeSession(
         api_key=settings.realtime_api_key,
         model=settings.realtime_model,
-        voice=settings.realtime_voice,
+        voice=voice,
         instructions=agent.instructions,
         tools=agent.tools,
         sink=sink,
@@ -171,6 +178,7 @@ async def _run_realtime(
         if voice not in SELECTABLE_VOICES:
             log.warning("unknown_voice_ignored", voice=voice[:40])
             return
+        log.info("voice_change_requested", voice=voice)
         task = asyncio.create_task(session.set_voice(voice))
         pending.add(task)
         task.add_done_callback(pending.discard)
@@ -178,11 +186,9 @@ async def _run_realtime(
     room.on("data_received", _on_data)
 
     agent.begin()
-    log.info(
-        "listening_realtime",
-        model=settings.realtime_model,
-        voice=settings.realtime_voice,
-    )
+    # The voice actually in use, not the configured default — reporting the
+    # default made a working voice change indistinguishable from a broken one.
+    log.info("listening_realtime", model=settings.realtime_model, voice=voice)
 
     call = asyncio.create_task(session.run(frames()))
     hangup = asyncio.create_task(disconnected.wait())
@@ -369,6 +375,28 @@ async def _wait_for_audio_track(
         return None
     finally:
         room.off("track_subscribed", _on_subscribed)
+
+
+def _requested_voice(participant: rtc.Participant) -> str | None:
+    """The voice picked on the page before Connect was pressed.
+
+    It has to arrive this way rather than over the data channel. OpenAI refuses
+    a voice change once the conversation holds any assistant audio —
+    ``cannot_update_voice`` — and the agent greets a second after connecting,
+    so every mid-call change is rejected. The picker looked broken; it was the
+    timing that was wrong.
+
+    Signed into the token, like the caller's number, so the same trust argument
+    applies and a junk value cannot reach a vendor SDK.
+    """
+    raw = getattr(participant, "metadata", None)
+    if not raw:
+        return None
+    try:
+        voice = json.loads(raw).get("voice")
+    except (ValueError, AttributeError):
+        return None
+    return voice if voice in SELECTABLE_VOICES else None
 
 
 def _tts_sample_rate(settings: Settings) -> int:

@@ -210,3 +210,46 @@ def test_config_leaks_no_credentials(client: TestClient) -> None:
     raw = json.dumps(client.get("/api/config").json())
     assert SECRET not in raw
     assert "api_key" not in raw
+
+
+# ── the voice is fixed before the call starts ────────────────────────────────
+#
+# The bug these guard: the picker sent set_voice over the data channel
+# mid-call, and OpenAI answered every one of them with "cannot_update_voice —
+# cannot update a conversation's voice if assistant audio is present". The
+# agent greets a second after connecting, so audio is *always* present by the
+# time the picker is reachable. It reached the user as "changing the voice
+# does not work", with nothing in the browser to say why.
+
+
+def _metadata(token: str) -> dict[str, object]:
+    claims = _decode(token.split(".")[1])
+    return json.loads(str(claims.get("metadata", "{}")))
+
+
+def test_the_chosen_voice_is_signed_into_the_token() -> None:
+    client = TestClient(create_app(_settings(voice_mode="realtime")))
+    body = client.post("/api/token", json={"voice": "marin"}).json()
+    assert _metadata(body["token"])["voice"] == "marin"
+
+
+def test_a_voice_the_engine_cannot_speak_is_dropped() -> None:
+    """Uplift ids while realtime is running, and the reverse."""
+    client = TestClient(create_app(_settings(voice_mode="realtime")))
+    body = client.post("/api/token", json={"voice": "broadband-support"}).json()
+    assert "voice" not in _metadata(body["token"]), "the worker falls back to its default"
+
+
+def test_no_voice_asked_for_means_no_metadata() -> None:
+    client = TestClient(create_app(_settings(voice_mode="realtime")))
+    assert _metadata(client.post("/api/token", json={}).json()["token"]) == {}
+
+
+def test_the_page_does_not_try_to_switch_voice_mid_call() -> None:
+    """A handler here would look like it worked and never do anything."""
+    from pathlib import Path
+
+    source = Path("src/agent/api/static/app.js").read_text(encoding="utf-8")
+    assert "set_voice" not in source.split("/* No mid-call handler.")[0], (
+        "the voice belongs in the token, not the data channel"
+    )

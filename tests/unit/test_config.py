@@ -307,3 +307,18 @@ def test_fast_variants_are_openrouter_only(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv("OPENROUTER_BASE_URL", "https://api.openai.com/v1")
     monkeypatch.setenv("LLM_MODEL", "gpt-4.1-mini")
     assert Settings().resolved_llm_model == "gpt-4.1-mini"
+
+
+def test_voice_mode_set_to_a_provider_name_says_so() -> None:
+    """VOICE_MODE=uplift reads entirely plausible and is not a mode.
+
+    It cost a whole demo: Settings raised, the worker died at startup, and
+    every call afterwards joined a room no agent was ever dispatched to — so
+    the failure looked like LiveKit rather than like one line of .env.
+    """
+    import pytest
+
+    from agent.config import Settings
+
+    with pytest.raises(ValueError, match="TTS_PROVIDER=uplift"):
+        Settings(_env_file=None, voice_mode="uplift")  # type: ignore[arg-type]

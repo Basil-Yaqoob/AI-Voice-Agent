@@ -98,12 +98,20 @@ async function connect() {
     const res = await fetch('/api/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ caller_phone: els.caller.value || null }),
+      body: JSON.stringify({
+        caller_phone: els.caller.value || null,
+        // Before the call, not during it: the agent greets a second after
+        // connecting and OpenAI will not change voice once it has spoken.
+        voice: els.voice.value || null,
+      }),
     });
     if (!res.ok) throw new Error('token endpoint returned ' + res.status);
     const { token, url } = await res.json();
 
     els.caller.disabled = true;
+    // Both are properties of the call, fixed the moment it starts. Leaving
+    // them live invited a change that silently did nothing.
+    els.voice.disabled = true;
 
     room = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
     room.on(LivekitClient.RoomEvent.DataReceived, onData);
@@ -145,6 +153,7 @@ async function connect() {
       els.connect.textContent = 'Connect';
       els.connect.classList.remove('stop');
       els.caller.disabled = false;
+      els.voice.disabled = false;
       room = null;
     });
 
@@ -213,15 +222,7 @@ loadConfig();
 
 els.connect.addEventListener('click', () => (room ? disconnect() : connect()));
 
-els.voice.addEventListener('change', async () => {
-  if (!room) return;
-  // Best-effort: a voice change must never be able to drop the call.
-  try {
-    await room.localParticipant.publishData(
-      new TextEncoder().encode(JSON.stringify({ type: 'set_voice', voice: els.voice.value })),
-      { reliable: true }
-    );
-  } catch (e) {
-    /* ignore */
-  }
-});
+/* No mid-call handler. The voice travels in the token and is fixed for the
+ * call: OpenAI answers a later change with "cannot_update_voice — cannot
+ * update a conversation's voice if assistant audio is present", and the
+ * greeting means audio is always present. Hang up and reconnect to switch. */

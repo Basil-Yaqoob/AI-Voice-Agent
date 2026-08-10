@@ -181,6 +181,24 @@ class Settings(BaseSettings):
             model = _OPENROUTER_FAST_VARIANTS[model]
         return model
 
+    @field_validator("voice_mode", mode="before")
+    @classmethod
+    def _voice_mode_is_not_a_provider_name(cls, v: object) -> object:
+        """Catch ``VOICE_MODE=uplift``, which reads entirely plausible.
+
+        It is not a mode, it is a TTS provider, and the two are set separately.
+        The cost of getting it wrong is out of all proportion to the mistake:
+        Settings raises, the worker dies at startup, and every call afterwards
+        connects to a room no agent ever joins — so the demo looks broken in a
+        way that points at LiveKit rather than at one line of .env.
+        """
+        if isinstance(v, str) and v in ("azure", "inworld", "uplift", "fake"):
+            raise ValueError(
+                f"VOICE_MODE={v!r} is a TTS provider, not a voice mode. "
+                f"Set TTS_PROVIDER={v} and VOICE_MODE=pipeline."
+            )
+        return v
+
     @field_validator("llm_effort")
     @classmethod
     def _effort_stays_low_on_hot_path(cls, v: str) -> str:

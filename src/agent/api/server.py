@@ -42,6 +42,11 @@ class TokenRequest(BaseModel):
     """
 
     caller_phone: str | None = None
+    # Chosen before the call, not during it. OpenAI refuses a voice change once
+    # the session has produced any audio ("cannot_update_voice"), and the agent
+    # greets within a second of connecting — so by the time the picker is
+    # reachable the voice is already fixed for the rest of the call.
+    voice: str | None = None
 
 
 class TokenResponse(BaseModel):
@@ -76,10 +81,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not (key and secret):
             raise HTTPException(503, "LiveKit credentials are not configured")
 
+        from agent.providers.voices import selectable_for
+
         room = f"demo-{uuid4().hex[:8]}"
         identity = identity_for(request.caller_phone if request else None)
+
+        # Validated here rather than trusted from the browser: it is signed
+        # into the token and handed to a vendor SDK on the other side.
+        allowed = {v.id for v in selectable_for(s.voice_mode, s.tts_provider)}
+        wanted = request.voice if request else None
+        voice = wanted if wanted in allowed else None
+        if wanted and voice is None:
+            log.warning("token_voice_rejected", voice=wanted[:40], mode=s.voice_mode)
+
         return TokenResponse(
-            token=_jwt(key, secret, room, identity),
+            token=_jwt(key, secret, room, identity, voice),
             url=s.livekit_url,
             room=room,
             identity=identity,
@@ -157,7 +173,9 @@ def _llm_check(s: Settings) -> str:
     return "not selected"
 
 
-def _jwt(api_key: str, api_secret: str, room: str, identity: str) -> str:
+def _jwt(
+    api_key: str, api_secret: str, room: str, identity: str, voice: str | None = None
+) -> str:
     """Mint a LiveKit access token.
 
     Hand-rolled rather than pulled from the LiveKit SDK: it is a plain HS256 JWT
@@ -178,6 +196,10 @@ def _jwt(api_key: str, api_secret: str, room: str, identity: str) -> str:
         "exp": now + int(TOKEN_TTL.total_seconds()),
         "video": {"room": room, "roomJoin": True, "canPublish": True, "canSubscribe": True},
     }
+    if voice:
+        # Rides on the participant, so the worker can read it off the identity
+        # it already trusts — the same route the caller's number takes.
+        payload["metadata"] = json.dumps({"voice": voice})
 
     def segment(data: dict[str, Any]) -> bytes:
         raw = json.dumps(data, separators=(",", ":"), sort_keys=True).encode()
