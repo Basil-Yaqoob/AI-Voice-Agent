@@ -14,6 +14,7 @@ Production conversational AI for Pakistani customers — code-switched Urdu/Engl
 | **[docs/00-ARCHITECTURE.md](docs/00-ARCHITECTURE.md)** | Before writing code. Module layout, data flow, the four hot-path rules. |
 | **[docs/01-TECH-DECISIONS.md](docs/01-TECH-DECISIONS.md)** | When you disagree with a choice. Every decision with its rejected alternative. |
 | **[docs/02-TESTING-STRATEGY.md](docs/02-TESTING-STRATEGY.md)** | Before writing tests. How to test a system whose input and output are audio. |
+| **[docs/03-SWITCHING-VOICES.md](docs/03-SWITCHING-VOICES.md)** | To change which engine speaks. `VOICE_MODE` vs `TTS_PROVIDER`, and why the picker shows what it does. |
 
 ---
 
