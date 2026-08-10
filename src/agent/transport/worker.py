@@ -44,6 +44,7 @@ from livekit.agents import AutoSubscribe, JobContext
 from agent.config import Settings, get_settings
 from agent.main import VoiceAgent, open_database
 from agent.telemetry.logging import get_logger
+from agent.transport import realtime as realtime_module
 from agent.transport.sink import LiveKitSink
 
 __all__ = ["entrypoint"]
@@ -79,7 +80,9 @@ async def entrypoint(ctx: JobContext) -> None:
     if database is not None:
         await database.warm()
 
-    sink = LiveKitSink(sample_rate=_tts_sample_rate(settings))
+    realtime = settings.voice_mode == "realtime"
+    rate = realtime_module.SAMPLE_RATE if realtime else _tts_sample_rate(settings)
+    sink = LiveKitSink(sample_rate=rate)
     await sink.publish(ctx.room)
 
     agent = VoiceAgent(
@@ -91,7 +94,10 @@ async def entrypoint(ctx: JobContext) -> None:
     )
 
     try:
-        await _run_call(agent, settings, ctx.room, participant)
+        if realtime:
+            await _run_realtime(agent, settings, ctx.room, participant, sink)
+        else:
+            await _run_call(agent, settings, ctx.room, participant)
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -103,6 +109,70 @@ async def entrypoint(ctx: JobContext) -> None:
         if database is not None:
             database.close()
         log.info("call_ended", room=ctx.room.name)
+
+
+async def _run_realtime(
+    agent: VoiceAgent,
+    settings: Settings,
+    room: rtc.Room,
+    participant: rtc.Participant,
+    sink: LiveKitSink,
+) -> None:
+    """Speech to speech on one socket. No STT, no TTS, no turn runner.
+
+    The agent object is still built, and still owns the things that are not the
+    model's to decide: which persona and corpus describe the business, and a
+    tool registry bound to this caller's phone number. Only the audio path
+    changes.
+    """
+    track = await _wait_for_audio_track(room, participant)
+    if track is None:
+        log.warning("caller_published_no_audio", participant=participant.identity)
+        return
+
+    audio = rtc.AudioStream(
+        track,
+        sample_rate=realtime_module.SAMPLE_RATE,
+        num_channels=1,
+        frame_size_ms=_FRAME_MS,
+    )
+
+    disconnected = asyncio.Event()
+    room.on("participant_disconnected", lambda _p: disconnected.set())
+
+    async def frames() -> Any:
+        try:
+            async for event in audio:
+                yield bytes(event.frame.data)
+        finally:
+            await audio.aclose()
+
+    session = realtime_module.RealtimeSession(
+        api_key=settings.realtime_api_key,
+        model=settings.realtime_model,
+        voice=settings.realtime_voice,
+        instructions=agent.instructions,
+        tools=agent.tools,
+        sink=sink,
+        publish=agent.publish,
+    )
+
+    agent.begin()
+    log.info(
+        "listening_realtime",
+        model=settings.realtime_model,
+        voice=settings.realtime_voice,
+    )
+
+    call = asyncio.create_task(session.run(frames()))
+    hangup = asyncio.create_task(disconnected.wait())
+    try:
+        await asyncio.wait({call, hangup}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in (call, hangup):
+            task.cancel()
+        if call.done() and not call.cancelled():
+            call.result()
 
 
 async def _run_call(

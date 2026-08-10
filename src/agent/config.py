@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     # ~200ms per synthesis, which is most of the 110ms TTS budget.
     azure_speech_region: str = "southeastasia"
     inworld_api_key: SecretStr = SecretStr("")
+    # The realtime path talks to OpenAI directly. Falls back to the OpenRouter
+    # key so a setup that points that adapter at api.openai.com already works.
+    openai_api_key: SecretStr = SecretStr("")
 
     livekit_url: str = "ws://localhost:7880"
     livekit_api_key: SecretStr = SecretStr("")
@@ -78,6 +81,19 @@ class Settings(BaseSettings):
     # ---- language ----------------------------------------------------------
     stt_language: str = "ur"
     tts_voice_urdu: str = "ur-PK-UzmaNeural"
+
+    # ---- voice mode ----------------------------------------------------------
+    # "realtime" is one socket to OpenAI for listening, thinking and speaking:
+    # ~520ms to first audio against ~2,540ms for the three-vendor pipeline, and
+    # voices a native speaker preferred to Azure ur-PK.
+    #
+    # "pipeline" keeps Deepgram + LLM + Azure. It stays because realtime makes
+    # the entire voice path depend on one vendor, and the reason the provider
+    # interfaces exist — two viable Urdu TTS suppliers in the whole market —
+    # has not changed.
+    voice_mode: Literal["realtime", "pipeline"] = "realtime"
+    realtime_model: str = "gpt-realtime"
+    realtime_voice: str = "cedar"
     tts_voice_english: str = "en-US-AriaNeural"
 
     # ---- latency budget in ms (asserted by tests/latency/) -------------------
@@ -111,6 +127,13 @@ class Settings(BaseSettings):
     retrieval_top_k: int = Field(default=4, ge=1, le=20)
     answer_cache_ttl_s: int = Field(default=3600, ge=0)
     answer_cache_threshold: float = Field(default=0.93, ge=0.0, le=1.0)
+
+    @property
+    def realtime_api_key(self) -> str:
+        return (
+            self.openai_api_key.get_secret_value()
+            or self.openrouter_api_key.get_secret_value()
+        )
 
     @property
     def resolved_llm_model(self) -> str:

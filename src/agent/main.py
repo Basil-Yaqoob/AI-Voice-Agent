@@ -333,6 +333,20 @@ class VoiceAgent:
         return load_keyterms()
 
     @property
+    def instructions(self) -> str:
+        """The system prompt: persona, policy corpus and how to behave."""
+        return self._system.prefix
+
+    @property
+    def tools(self) -> Any:
+        """The tool registry, already bound to this caller."""
+        return self._tools
+
+    async def publish(self, payload: dict[str, Any]) -> None:
+        """Send a UI message to the room. Used by the realtime session."""
+        await self._publish(payload)
+
+    @property
     def stt(self) -> STTProvider:
         """The transport opens the recognition stream, so it needs the provider.
 
