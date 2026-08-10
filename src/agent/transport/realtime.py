@@ -98,6 +98,7 @@ class RealtimeSession:
             self._ws = ws
             await self._configure()
             self._player = asyncio.create_task(self._play())
+            await self._greet()
 
             pump = asyncio.create_task(self._send_audio(frames))
             recv = asyncio.create_task(self._receive())
@@ -131,7 +132,12 @@ class RealtimeSession:
                                 "create_response": True,
                                 "interrupt_response": True,
                             },
-                            "transcription": {"model": "whisper-1"},
+                            # Pinned, not auto-detected. Urdu, Hindi and
+                            # Punjabi are close enough in speech that
+                            # auto-detection returns Devanagari or Gurmukhi
+                            # for perfectly good Urdu — the caller sees their
+                            # own sentence in a script they may not read.
+                            "transcription": {"model": "whisper-1", "language": "ur"},
                         },
                         "output": {
                             "voice": self._voice,
@@ -148,6 +154,27 @@ class RealtimeSession:
                         for tool in self._tools.definitions()
                     ],
                     "tool_choice": "auto",
+                },
+            }
+        )
+
+    async def _greet(self) -> None:
+        """Speak first.
+
+        Without this the agent waits for the caller, and a phone line that
+        answers with silence gets "hello? hello?" and then a hang-up. The
+        caller should hear who they have reached before they say anything.
+        """
+        await self._send(
+            {
+                "type": "response.create",
+                "response": {
+                    "instructions": (
+                        "Greet the caller now, before they have said anything. "
+                        "One short sentence of natural Urdu: thank them for "
+                        "calling DVAGO and ask how you can help. Do not call "
+                        "any tool and do not mention the caller by name yet."
+                    )
                 },
             }
         )

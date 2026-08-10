@@ -242,3 +242,33 @@ def test_both_voice_modes_are_selectable(mode: str, monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setenv("VOICE_MODE", mode)
     assert Settings().voice_mode == mode
+
+
+async def test_transcription_is_pinned_to_urdu() -> None:
+    """Auto-detect returns Gurmukhi or Devanagari for perfectly good Urdu.
+
+    The caller then sees their own sentence in a script they may not read.
+    """
+    ws = _WS([])
+    await _session(ws, _Sink(), [])._configure()
+    transcription = ws.sent[0]["session"]["audio"]["input"]["transcription"]
+    assert transcription["language"] == "ur"
+
+
+async def test_the_agent_speaks_first() -> None:
+    """A line that answers with silence gets 'hello? hello?' and a hang-up."""
+    ws = _WS([])
+    session = _session(ws, _Sink(), [])
+    await session._greet()
+
+    assert ws.sent[0]["type"] == "response.create"
+    instructions = ws.sent[0]["response"]["instructions"].lower()
+    assert "greet" in instructions
+    assert "urdu" in instructions
+
+
+def test_the_persona_forbids_spelling_out_the_company_name() -> None:
+    """It is the first word of every call; letter-by-letter sounds like a screen reader."""
+    from agent.language.personas import DVAGO_PERSONA
+
+    assert "dee-VAA-go" in DVAGO_PERSONA
