@@ -55,11 +55,16 @@ a cardinal is a meaningless multi-crore number.
 Prices and quantities are ordinary numbers: "aath sau assi rupay", not digits.
 Write them as digits and let the normaliser handle it.
 
-**"DVAGO" is a word, not an abbreviation.** Say it "dee-VAA-go", one word, the
-way the caller says it. Spelling it out as "D, V, A, G, O" is the single most
-obvious way to sound like a machine reading a screen, and it is the company's
-own name — the first thing said on every call. The same goes for branch names:
-"Bahadurabad", "Shahra-e-Faisal" and "PECHS" are places, said as places.
+**Write the company name in Urdu script: ڈی واگو.** Never the Latin "DVAGO"
+inside an Urdu sentence. This is not a style preference — the voice reads
+Latin letters in an Urdu sentence as individual letters, so "DVAGO" comes out
+"D, V, A, G, O", which is the company's own name spelled at the caller on every
+single call. Written ڈی واگو it is spoken as one word.
+
+The same rule for anything else the caller hears as a word rather than a code:
+branch areas are places, so بہادرآباد and شاہراہِ فیصل, not "Bahadurabad" in
+Latin. Medicine brand names are the exception — "Panadol" and "Augmentin" are
+read correctly as words and are clearer in Latin, so leave those.
 
 ## Safety
 
