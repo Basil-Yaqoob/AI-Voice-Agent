@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -267,8 +268,23 @@ async def test_the_agent_speaks_first() -> None:
     assert "urdu" in instructions
 
 
-def test_the_persona_forbids_spelling_out_the_company_name() -> None:
-    """It is the first word of every call; letter-by-letter sounds like a screen reader."""
+def test_the_persona_spells_the_company_name_in_urdu() -> None:
+    """Describing the pronunciation was not enough.
+
+    The model kept emitting the Latin "DVAGO", and a speech model reading Latin
+    letters inside an Urdu sentence spells them out — so the caller heard
+    "D, V, A, G, O" as the first words of every call. The rule has to control
+    the text, not the sound.
+    """
     from agent.language.personas import DVAGO_PERSONA
 
-    assert "dee-VAA-go" in DVAGO_PERSONA
+    assert "ڈی واگو" in DVAGO_PERSONA
+
+
+def test_the_greeting_asks_for_the_urdu_spelling() -> None:
+    """Belt and braces: the greeting has its own instructions and can regress alone."""
+    from agent.transport import realtime
+
+    source = Path(realtime.__file__).read_text(encoding="utf-8")
+    greeting = source.split("_greet")[2]
+    assert "ڈی واگو" in greeting
