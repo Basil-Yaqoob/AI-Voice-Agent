@@ -198,6 +198,24 @@ async def test_llm_streams_and_reports_ttft(live: Settings) -> None:
     assert reply.strip(), "model returned nothing"
     assert ttft_ms is not None
 
+    # This used to stop at "is not None", which passes at four seconds. A test
+    # that measures the headline requirement and then declines to enforce it is
+    # how a 13x miss reaches a demo unnoticed.
+    #
+    # Measured 10 Aug 2026 over OpenRouter from Karachi, warm connection:
+    # Opus 5 3,942ms, Sonnet 5 2,700ms, Haiku 4.5 1,698ms — against a 300ms
+    # slice. If this fails, the cause is usually one of three things, in
+    # descending order of impact: the model (Opus is the slowest option), the
+    # provider hop (OpenRouter routes via its own servers; the direct Anthropic
+    # API removes it), or where this is running (~390ms of the total here is
+    # the TLS round trip from Pakistan — a worker in Mumbai or Singapore pays
+    # a fraction of that).
+    assert ttft_ms <= live.budget_ttft_ms, (
+        f"TTFT {ttft_ms:.0f}ms exceeds the {live.budget_ttft_ms}ms budget for "
+        f"{live.resolved_llm_model} via {llm.name}. See the note above: check "
+        f"the model first, then the provider, then the host region."
+    )
+
 
 async def test_llm_replies_in_urdu(live: Settings) -> None:
     """The register is the product. An English reply to an Urdu question fails."""

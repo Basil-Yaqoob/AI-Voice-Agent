@@ -163,11 +163,19 @@ def _parse_args(raw: str) -> dict[str, object]:
 
 
 def _usage(raw: Any) -> Usage:
+    """Both cache counters live under ``prompt_tokens_details``.
+
+    Reading only ``cached_tokens`` makes the first turn of every session
+    indistinguishable from a broken cache: the write shows up as zero, the read
+    is legitimately zero, and the log says the prefix never cached. Verified
+    against OpenRouter — a 6,403-token prefix reports ``cache_write_tokens`` on
+    the first call and ``cached_tokens`` on the second, and the cost drops
+    twelvefold between them.
+    """
     details = getattr(raw, "prompt_tokens_details", None)
-    cached = getattr(details, "cached_tokens", 0) or 0
     return Usage(
         input_tokens=getattr(raw, "prompt_tokens", 0) or 0,
         output_tokens=getattr(raw, "completion_tokens", 0) or 0,
-        cache_read_tokens=cached,
-        cache_write_tokens=0,  # not reported separately over this protocol
+        cache_read_tokens=getattr(details, "cached_tokens", 0) or 0,
+        cache_write_tokens=getattr(details, "cache_write_tokens", 0) or 0,
     )

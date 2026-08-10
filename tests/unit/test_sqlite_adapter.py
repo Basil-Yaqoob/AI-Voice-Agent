@@ -8,8 +8,10 @@ never shares a connection between threads, and foreign keys are actually on.
 from __future__ import annotations
 
 import asyncio
+import logging
 import sqlite3
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -112,6 +114,32 @@ async def test_warm_makes_the_first_query_cheap(db: Database) -> None:
     started = loop.time()
     await db.fetch_one("SELECT 1 AS ok")
     assert (loop.time() - started) < 0.05
+
+
+async def test_query_timing_uses_a_fine_grained_clock() -> None:
+    """Regression: the slow-query timer must not use the event loop clock.
+
+    On Windows ``loop.time()`` is ``time.monotonic()`` at 15.625ms resolution —
+    coarser than half the 25ms slow-query threshold. Durations quantise to
+    multiples of it, so fast indexed queries report 15.6 or 31.2ms and the log
+    fills with warnings about queries that are perfectly fine.
+    """
+    from agent.data import sqlite as module
+
+    assert module._now is time.perf_counter
+    assert time.get_clock_info("perf_counter").resolution <= 1e-6
+    assert module.SLOW_QUERY_MS > time.get_clock_info("perf_counter").resolution * 1000
+
+
+async def test_a_fast_query_is_not_reported_as_slow(
+    db: Database, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The bug this guards was invisible except as noise in the log."""
+    await db.warm()
+    with caplog.at_level(logging.WARNING):
+        for _ in range(50):
+            await db.fetch_all("SELECT * FROM parent WHERE id = ?", ("p1",))
+    assert "slow_query" not in caplog.text
 
 
 async def test_health_reports_true(db: Database) -> None:

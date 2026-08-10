@@ -127,3 +127,98 @@ async def test_provider_error_propagates() -> None:
     fake = FakeLLM(fail_with=RuntimeError("upstream 503"))
     with pytest.raises(RuntimeError, match="upstream 503"):
         await _drain(fake.stream([], system=SYSTEM))
+
+
+# ── provider usage parsing ───────────────────────────────────────────────────
+#
+# Both parsers read attributes off a vendor response object. Nothing else in
+# the suite exercises them, and a wrong field name here is invisible: the call
+# succeeds, the answer is right, and only the bill changes.
+
+
+class _Details:
+    def __init__(self, **fields: int) -> None:
+        self.__dict__.update(fields)
+
+
+class _Raw:
+    def __init__(self, **fields: object) -> None:
+        self.__dict__.update(fields)
+
+
+def test_openrouter_reads_both_cache_counters() -> None:
+    """Shapes taken from a live OpenRouter response, not invented.
+
+    A 6,403-token prefix reports cache_write_tokens on the first call and
+    cached_tokens on the second. Reading only the second makes turn one look
+    like a cache that never engaged.
+    """
+    from agent.providers.llm_openrouter import _usage
+
+    first = _usage(
+        _Raw(
+            prompt_tokens=6412,
+            completion_tokens=5,
+            prompt_tokens_details=_Details(cache_write_tokens=6403, cached_tokens=0),
+        )
+    )
+    assert first.cache_write_tokens == 6403
+    assert first.cache_read_tokens == 0
+
+    second = _usage(
+        _Raw(
+            prompt_tokens=6412,
+            completion_tokens=5,
+            prompt_tokens_details=_Details(cache_write_tokens=0, cached_tokens=6403),
+        )
+    )
+    assert second.cache_read_tokens == 6403
+    assert second.cache_engaged
+
+
+def test_openrouter_usage_survives_a_missing_details_block() -> None:
+    """Some models and some errors omit it entirely."""
+    from agent.providers.llm_openrouter import _usage
+
+    usage = _usage(_Raw(prompt_tokens=10, completion_tokens=2))
+    assert usage.input_tokens == 10
+    assert usage.cache_read_tokens == 0
+    assert usage.cache_write_tokens == 0
+
+
+def test_claude_reads_both_cache_counters() -> None:
+    from agent.providers.llm_claude import _usage
+
+    usage = _usage(
+        _Raw(
+            input_tokens=6412,
+            output_tokens=5,
+            cache_read_input_tokens=6403,
+            cache_creation_input_tokens=0,
+        )
+    )
+    assert usage.cache_read_tokens == 6403
+    assert usage.cache_engaged
+
+
+def test_both_providers_agree_on_the_usage_shape() -> None:
+    """The pipeline reads one Usage type; the adapters must fill the same fields."""
+    from agent.providers.llm_claude import _usage as claude_usage
+    from agent.providers.llm_openrouter import _usage as openrouter_usage
+
+    a = claude_usage(
+        _Raw(
+            input_tokens=100,
+            output_tokens=20,
+            cache_read_input_tokens=80,
+            cache_creation_input_tokens=5,
+        )
+    )
+    b = openrouter_usage(
+        _Raw(
+            prompt_tokens=100,
+            completion_tokens=20,
+            prompt_tokens_details=_Details(cached_tokens=80, cache_write_tokens=5),
+        )
+    )
+    assert a == b

@@ -24,5 +24,27 @@ services:
       interval: 5s
       retries: 5
 
+  # Media transport for the browser demo. --dev is a real LiveKit server with
+  # the well-known credentials devkey/secret baked in, so nothing has to be
+  # provisioned to talk to the agent from a laptop.
+  #
+  # It is dev-only in the literal sense: those credentials are published in
+  # LiveKit's own docs, so anyone who can reach the port can mint a token.
+  # Never expose 7880 beyond localhost, and never reuse these values anywhere
+  # a real caller could reach.
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --dev --bind 0.0.0.0
+    ports:
+      - "127.0.0.1:7880:7880"       # signalling (WebSocket)
+      - "127.0.0.1:7881:7881"       # ICE-TCP media fallback
+      - "127.0.0.1:7882:7882/udp"   # RTC media. Omit it and every call
+                                    # silently degrades to the TCP fallback,
+                                    # which adds jitter to a latency demo.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7880"]
+      interval: 5s
+      retries: 5
+
 volumes:
   pgdata:

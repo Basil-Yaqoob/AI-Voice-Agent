@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -49,6 +50,15 @@ _DEFAULT_WORKERS = 4
 # A query slower than this is a missing index, not a slow disk. Tool calls sit
 # inside the 300ms LLM slice of the latency budget and have nowhere to hide.
 SLOW_QUERY_MS = 25.0
+
+# Must be perf_counter, never loop.time(). On Windows the event loop clock is
+# time.monotonic(), whose resolution is 15.625ms — coarser than half this
+# threshold. Every duration quantises to a multiple of it, so a 1ms query that
+# straddles a tick boundary reports 15.6ms and two of them report 31.2ms. The
+# symptom is a log full of slow_query warnings naming perfectly good indexed
+# queries, and a day spent optimising them. perf_counter is sub-microsecond on
+# every platform we run on.
+_now = time.perf_counter
 
 
 class Database:
@@ -146,11 +156,11 @@ class Database:
         if self._closed:
             raise RuntimeError("database is closed")
         loop = asyncio.get_running_loop()
-        started = loop.time()
+        started = _now()
         try:
             return await loop.run_in_executor(self._pool, fn, sql, params)
         finally:
-            elapsed_ms = (loop.time() - started) * 1000
+            elapsed_ms = (_now() - started) * 1000
             if elapsed_ms > SLOW_QUERY_MS:
                 log.warning(
                     "slow_query", ms=round(elapsed_ms, 1), sql=" ".join(sql.split())[:120]

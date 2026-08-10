@@ -549,3 +549,46 @@ async def test_every_tool_survives_empty_arguments(ayesha: DvagoBackend) -> None
             continue
         result = await registry.call(definition.name, {})
         assert result.content
+
+
+async def test_every_schema_matches_its_handler(ayesha: DvagoBackend) -> None:
+    """The schema is the only description of a tool the model ever sees.
+
+    If it advertises a parameter the handler does not accept, every call fails
+    with "Invalid arguments" — and it fails at runtime, mid-call, in front of a
+    caller, not at import. Renaming a handler argument without updating the
+    schema is the easy way to cause it.
+    """
+    import inspect
+
+    for definition in build_dvago_registry(ayesha).definitions():
+        advertised = set(definition.input_schema.get("properties", {}))
+        signature = inspect.signature(getattr(ayesha, definition.name))
+        accepted = {name for name in signature.parameters if name != "self"}
+        assert advertised == accepted, (
+            f"{definition.name}: schema says {sorted(advertised)}, "
+            f"handler takes {sorted(accepted)}"
+        )
+
+
+async def test_required_parameters_are_actually_required(ayesha: DvagoBackend) -> None:
+    """A parameter the schema marks required must have no default, and vice versa.
+
+    Marking an optional parameter required makes the model invent a value for
+    it rather than omit it — which is how "check stock" turns into a query for
+    a city the caller never mentioned.
+    """
+    import inspect
+
+    for definition in build_dvago_registry(ayesha).definitions():
+        required = set(definition.input_schema.get("required", []))
+        signature = inspect.signature(getattr(ayesha, definition.name))
+        mandatory = {
+            name
+            for name, param in signature.parameters.items()
+            if name != "self" and param.default is inspect.Parameter.empty
+        }
+        assert required == mandatory, (
+            f"{definition.name}: schema requires {sorted(required)}, "
+            f"handler mandates {sorted(mandatory)}"
+        )
