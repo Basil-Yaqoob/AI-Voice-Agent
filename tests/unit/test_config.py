@@ -269,3 +269,41 @@ def test_settings_json_roundtrip_is_loggable() -> None:
     parsed = json.loads(s.model_dump_json())
     assert parsed["llm_model"] == "claude-opus-5"
     assert SECRET not in json.dumps(parsed)
+
+
+# ── model id resolution across OpenAI-compatible hosts ───────────────────────
+#
+# The adapter speaks the OpenAI protocol, which OpenRouter and OpenAI both
+# serve. Only OpenRouter namespaces models by vendor, and applying that
+# convention to the wrong host 404s every request.
+
+
+def test_openrouter_gets_the_vendor_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv("LLM_MODEL", "claude-opus-5")
+    assert Settings().resolved_llm_model == "anthropic/claude-opus-5"
+
+
+def test_openai_direct_keeps_the_bare_model_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prefixing here turns gpt-4.1-mini into anthropic/gpt-4.1-mini."""
+    monkeypatch.setenv("LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://api.openai.com/v1")
+    monkeypatch.setenv("LLM_MODEL", "gpt-4.1-mini")
+    assert Settings().resolved_llm_model == "gpt-4.1-mini"
+
+
+def test_an_explicit_vendor_prefix_is_left_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv("LLM_MODEL", "google/gemini-2.5-flash")
+    assert Settings().resolved_llm_model == "google/gemini-2.5-flash"
+
+
+def test_fast_variants_are_openrouter_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The -fast suffix is an OpenRouter model id, not an OpenAI one."""
+    monkeypatch.setenv("LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("LLM_FAST_MODE", "true")
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://api.openai.com/v1")
+    monkeypatch.setenv("LLM_MODEL", "gpt-4.1-mini")
+    assert Settings().resolved_llm_model == "gpt-4.1-mini"

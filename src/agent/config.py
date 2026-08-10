@@ -23,6 +23,16 @@ _OPENROUTER_FAST_VARIANTS: dict[str, str] = {
 }
 
 
+def _is_openrouter(base_url: str) -> bool:
+    """Whether the OpenAI-protocol adapter is pointed at OpenRouter itself.
+
+    It is not always: the same adapter talks to any OpenAI-compatible host,
+    and OpenRouter's vendor-prefix and fast-variant conventions apply only to
+    OpenRouter.
+    """
+    return "openrouter.ai" in base_url
+
+
 class Settings(BaseSettings):
     """Runtime configuration, loaded from the environment and ``.env``."""
 
@@ -74,7 +84,14 @@ class Settings(BaseSettings):
     budget_ttft_ms: int = Field(default=300, ge=1)
     budget_tts_ttfb_ms: int = Field(default=110, ge=1)
     budget_total_ms: int = Field(default=800, ge=1)
-    endpoint_silence_ms: int = Field(default=180, ge=1)
+    # 180ms was the budget figure, and against a real speaker it is far too
+    # eager: a pause to think, or the gap before reciting a phone number, reads
+    # as end-of-turn and the agent answers half a sentence. 500ms is the first
+    # value that survived being talked at in code-switched Urdu. It spends
+    # 320ms more of the 800ms budget than planned — the right trade, because
+    # being interrupted mid-sentence reads as broken in a way that a slightly
+    # later reply does not.
+    endpoint_silence_ms: int = Field(default=500, ge=1)
 
     # ---- data -----------------------------------------------------------------
     # Non-default ports: a native Postgres/Redis install often already owns 5432
@@ -112,7 +129,12 @@ class Settings(BaseSettings):
         if self.llm_provider != "openrouter":
             return model
 
-        if "/" not in model:
+        # The vendor prefix is OpenRouter's convention, not the SDK's. The same
+        # adapter also speaks to OpenAI directly — same protocol, different
+        # host, and one fewer network hop, which measured at 2.4s off the turn
+        # for OpenAI models. Prefixing there turns "gpt-4.1-mini" into
+        # "anthropic/gpt-4.1-mini" and every request 404s.
+        if "/" not in model and _is_openrouter(self.openrouter_base_url):
             model = f"anthropic/{model}"
         if self.llm_fast_mode and model in _OPENROUTER_FAST_VARIANTS:
             model = _OPENROUTER_FAST_VARIANTS[model]

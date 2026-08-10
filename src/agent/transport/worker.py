@@ -166,23 +166,48 @@ async def _run_call(
 
 
 async def _consume(agent: VoiceAgent, transcripts: Any) -> None:
+    """Turn a stream of transcript fragments into whole caller turns.
+
+    Deepgram reports two different kinds of finality and they are easy to
+    confuse, because the wrong one still produces sensible-looking text:
+
+    * ``is_final`` means this fragment will not be revised. It fires at every
+      natural pause — before a number, mid-list, whenever the speaker draws
+      breath.
+    * ``speech_final`` means the caller has stopped talking.
+
+    Running a turn on ``is_final`` chops one sentence into two or three, and
+    the agent answers each piece as though it were a whole question. So the
+    fragments accumulate here and only ``speech_final`` dispatches a turn.
+    """
     speaking = False
+    pending: list[str] = []
+
     async for transcript in transcripts:
-        if not transcript.text.strip():
+        text = transcript.text.strip()
+        if not text and not transcript.speech_final:
             continue
 
         if not speaking:
             speaking = True
-            # Fires the barge-in check. Doing this on the first partial rather
+            # Fires the barge-in check. Doing this on the first fragment rather
             # than on a VAD event keeps one source of truth for "the caller has
             # started talking".
             await agent.on_speech_started()
 
-        if transcript.is_final:
+        if transcript.speech_final:
+            pending.append(text)
+            utterance = " ".join(part for part in pending if part).strip()
+            pending.clear()
             speaking = False
-            await agent.on_final(transcript.text)
+            if utterance:
+                await agent.on_final(utterance)
+        elif transcript.is_final:
+            # Settled, but the caller is still going. Hold it.
+            pending.append(text)
+            agent.on_partial(" ".join(pending))
         else:
-            agent.on_partial(transcript.text)
+            agent.on_partial(" ".join([*pending, text]))
 
 
 async def _wait_for_audio_track(
