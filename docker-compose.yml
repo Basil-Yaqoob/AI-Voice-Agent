@@ -34,7 +34,14 @@ services:
   # a real caller could reach.
   livekit:
     image: livekit/livekit-server:latest
-    command: --dev --bind 0.0.0.0
+    # --node-ip is not optional here. Without it LiveKit advertises the address
+    # it sees on itself, which inside Docker is the bridge IP (172.x.x.x). The
+    # browser is on the host and cannot route there, so signalling succeeds,
+    # the participant joins, and then ICE fails and the call drops with
+    # CONNECTION_TIMEOUT — a failure that looks like a credentials problem and
+    # is not one. Pinning it to loopback makes the browser send media to the
+    # published port instead.
+    command: --dev --bind 0.0.0.0 --node-ip 127.0.0.1
     ports:
       - "127.0.0.1:7880:7880"       # signalling (WebSocket)
       - "127.0.0.1:7881:7881"       # ICE-TCP media fallback

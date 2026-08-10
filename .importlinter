@@ -19,6 +19,22 @@ forbidden_modules =
     deepgram
     azure
 
+[importlinter:contract:transport-owns-livekit]
+name = Only the transport layer may know about rooms and tracks
+type = forbidden
+source_modules =
+    agent.pipeline
+    agent.language
+    agent.knowledge
+    agent.interfaces
+    agent.telemetry
+    agent.data
+    agent.tools
+    agent.providers
+    agent.api
+forbidden_modules =
+    livekit
+
 [importlinter:contract:data-layer-is-generic]
 name = The database adapter must not know which business it serves
 type = forbidden

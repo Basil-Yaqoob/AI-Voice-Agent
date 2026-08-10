@@ -25,6 +25,7 @@ from agent.api.identity import phone_from_identity
 from agent.config import Settings, get_settings, validate_credentials
 from agent.data.sqlite import Database
 from agent.interfaces.llm import CachedPrompt, Message
+from agent.interfaces.stt import STTProvider
 from agent.knowledge.corpus import load_corpus_dir, plan_for_corpus
 from agent.knowledge.keyterms import load_keyterms
 from agent.language.personas import DVAGO_COMPANY, DVAGO_PERSONA
@@ -52,6 +53,12 @@ CORPUS_DIR = Path("knowledge/dvago")
 # Fallback when the DVAGO corpus has not been built yet, so `make demo` still
 # starts and says something useful rather than failing on a missing directory.
 FALLBACK_PERSONA = "You are Acme's customer support agent, taking calls from Pakistani customers."
+# The model can ask for tools, read the answers, and ask again — but only so
+# many times. Two rounds covers every DVAGO path (look the caller up, then look
+# the medicine up); an unbounded loop would let one turn run until the caller
+# hangs up.
+MAX_TOOL_ROUNDS = 3
+
 FALLBACK_CORPUS = """
 Acme sells prepaid internet packages across Pakistan.
 Delivery takes two to three working days in major cities, four to five elsewhere.
@@ -121,6 +128,29 @@ class VoiceAgent:
             # full input price. Worth knowing before reading the invoice.
             log.warning("prompt_prefix_below_cache_minimum", chars=len(self._system.prefix))
 
+    # ── call lifecycle ───────────────────────────────────────────────────
+
+    def begin(self) -> None:
+        """Open the call. Must be called before any transcript arrives.
+
+        The state machine starts IDLE and only IDLE -> GREETING -> LISTENING or
+        IDLE -> LISTENING are legal, so a transcript that arrives while still
+        IDLE raises IllegalTransition out of ``on_final`` and kills the call.
+        That is the machine doing its job — a turn beginning from a state the
+        agent was never put into is exactly the "inexplicable audio" it exists
+        to prevent — but the transport has to open the call for it.
+        """
+        if self._state.state is SessionState.IDLE:
+            self._state.to(SessionState.LISTENING)
+
+    def end(self) -> None:
+        """Close the call. Legal from any state."""
+        self._state.to(SessionState.TERMINATED)
+
+    @property
+    def state(self) -> SessionState:
+        return self._state.state
+
     # ── caller speech ────────────────────────────────────────────────────
 
     def on_partial(self, text: str) -> None:
@@ -156,18 +186,30 @@ class VoiceAgent:
         self._history.append(Message(role="user", content=text))
         await self._publish({"type": "transcript", "role": "user", "text": text, "final": True})
 
-        runner = TurnRunner(
-            llm=self._llm,
-            tts=self._tts,
-            sink=self._sink,
-            voice=self._voice,
-            tools=self._tools.definitions(),
-        )
-        task = asyncio.create_task(runner.run(self._history, system=self._system))
-        self._interrupts.track(task, runner)
-
+        # A turn is not one model call. Asked "Panadol hai?", the model answers
+        # with tool_calls and no text at all — correctly, because it cannot know
+        # the stock until something looks it up. Speaking that turn plays
+        # silence. So: run, execute whatever it asked for, feed the results
+        # back, run again, and speak the pass that finally produces words.
+        result = None
         try:
-            result = await self._interrupts.finish()
+            for _ in range(MAX_TOOL_ROUNDS):
+                runner = TurnRunner(
+                    llm=self._llm,
+                    tts=self._tts,
+                    sink=self._sink,
+                    voice=self._voice,
+                    tools=self._tools.definitions(),
+                )
+                task = asyncio.create_task(runner.run(self._history, system=self._system))
+                self._interrupts.track(task, runner)
+                result = await self._interrupts.finish()
+
+                if result is None or not result.tool_calls:
+                    break
+
+                metrics.tool_calls += len(result.tool_calls)
+                await self._run_tools(result)
         except asyncio.CancelledError:
             return  # barge-in; on_speech_started already recorded the partial
         except Exception as exc:
@@ -185,6 +227,37 @@ class VoiceAgent:
             )
             await self._publish({"type": "metrics", **metrics.as_log()})
             log.info(**metrics.as_log())
+
+    async def _run_tools(self, result: Any) -> None:
+        """Execute the tools the model asked for and put the answers in history.
+
+        Concurrently, because a stock lookup and a profile lookup have no reason
+        to queue behind each other inside the turn budget.
+
+        The results go back as a user message rather than as native tool_result
+        blocks: ``Message`` carries a role and a string, and widening it to
+        model-specific block types would push vendor shapes into the pipeline
+        that the provider interface exists to keep out. The model reads them
+        perfectly well this way.
+        """
+        outputs = await asyncio.gather(
+            *(self._tools.call(call.name, call.arguments) for call in result.tool_calls)
+        )
+        for call, output in zip(result.tool_calls, outputs, strict=True):
+            log.info("tool_called", tool=call.name, error=output.is_error)
+
+        if result.spoken:
+            # A filler line the caller already heard ("one moment") belongs in
+            # history before the results it was covering for.
+            self._history.append(Message(role="assistant", content=result.spoken))
+
+        self._history.append(
+            Message(
+                role="user",
+                content="[tool results]\n"
+                + "\n".join(output.content for output in outputs),
+            )
+        )
 
         self._state.to(SessionState.LISTENING)
 
@@ -223,6 +296,15 @@ class VoiceAgent:
     @property
     def keyterms(self) -> list[str]:
         return load_keyterms()
+
+    @property
+    def stt(self) -> STTProvider:
+        """The transport opens the recognition stream, so it needs the provider.
+
+        Exposed rather than rebuilt in the worker: two instances would mean two
+        Deepgram connections per call, one of them silently idle.
+        """
+        return self._stt
 
 
 def open_database(path: Path = DVAGO_DB) -> Database | None:
@@ -270,17 +352,41 @@ def main() -> int:
     settings = bootstrap()
 
     try:
-        from livekit.agents import cli  # noqa: F401
+        from livekit.agents import WorkerOptions, cli
     except ImportError:
         print("livekit-agents is not installed; run: uv sync")
         return 1
 
-    mode = sys.argv[1] if len(sys.argv) > 1 else "dev"
+    from agent.transport.worker import entrypoint
+
     print(
-        f"Agent configured ({mode}): {settings.resolved_llm_model} / "
-        f"{settings.tts_provider} / {settings.stt_provider}\n"
+        f"Agent: {settings.resolved_llm_model} / {settings.tts_provider} / "
+        f"{settings.stt_provider}\n"
+        f"Joining rooms on {settings.livekit_url}\n"
         "Control plane: uv run uvicorn agent.api.server:create_app --factory --port 8000\n"
         "Then open http://localhost:8000\n"
+    )
+
+    # Passed explicitly rather than left to the process environment, which is
+    # where the LiveKit worker looks by default. This project's configuration
+    # comes from .env through pydantic-settings, and that never exports the
+    # values — so a perfectly valid .env yields "ws_url is required".
+    #
+    # cli.run_app owns argv and the process lifecycle: signal handling, worker
+    # registration, graceful drain on shutdown. It exits rather than returning,
+    # which is why nothing follows it.
+    cli.run_app(
+        WorkerOptions(
+            entrypoint_fnc=entrypoint,
+            ws_url=settings.livekit_url,
+            api_key=settings.livekit_api_key.get_secret_value(),
+            api_secret=settings.livekit_api_secret.get_secret_value(),
+            # Keep one job process warm. The default in dev is zero, so the
+            # first caller pays a fresh interpreter start — imports, provider
+            # construction, the database open — before the agent even joins.
+            # That lands squarely on the first impression.
+            num_idle_processes=1,
+        )
     )
     return 0
 
