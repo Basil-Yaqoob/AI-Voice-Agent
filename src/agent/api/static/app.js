@@ -99,7 +99,39 @@ async function connect() {
 
     room = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
     room.on(LivekitClient.RoomEvent.DataReceived, onData);
+
+    // Without this the agent speaks into the void. The track arrives either
+    // way and the transcript still appears, so the failure looks like broken
+    // TTS rather than a missing line of browser plumbing.
+    room.on(LivekitClient.RoomEvent.TrackSubscribed, (track) => {
+      if (track.kind !== 'audio') return;
+      const el = track.attach();
+      el.autoplay = true;
+      el.setAttribute('data-agent-audio', '');
+      document.body.appendChild(el);
+    });
+
+    room.on(LivekitClient.RoomEvent.TrackUnsubscribed, (track) => {
+      track.detach().forEach((el) => el.remove());
+    });
+
+    // Chrome can still refuse to play until it sees a gesture it likes. The
+    // Connect click usually counts, but not always, and a silent agent with no
+    // explanation is the worst version of this to debug live.
+    room.on(LivekitClient.RoomEvent.AudioPlaybackStatusChanged, () => {
+      if (!room.canPlaybackAudio) {
+        showError('Browser blocked audio. Click anywhere to enable sound.');
+        const resume = async () => {
+          await room.startAudio();
+          showError('');
+          document.removeEventListener('click', resume);
+        };
+        document.addEventListener('click', resume);
+      }
+    });
+
     room.on(LivekitClient.RoomEvent.Disconnected, () => {
+      document.querySelectorAll('[data-agent-audio]').forEach((el) => el.remove());
       setState('disconnected');
       els.connect.disabled = false;
       els.connect.textContent = 'Connect';
