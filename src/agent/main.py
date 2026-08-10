@@ -63,6 +63,12 @@ MAX_TOOL_ROUNDS = 3
 # than a free string: the value arrives over the room data channel and is
 # handed straight to the TTS vendor, where a bad id fails mid-sentence.
 SELECTABLE_VOICES = frozenset({
+    # Realtime (VOICE_MODE=realtime)
+    "marin",
+    "cedar",
+    "alloy",
+    "shimmer",
+    # Azure ur-PK (VOICE_MODE=pipeline)
     "ur-PK-UzmaNeural",
     "ur-PK-AsadNeural",
 })

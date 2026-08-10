@@ -252,6 +252,24 @@ class RealtimeSession:
         # The model does not resume on its own after a tool result.
         await self._send({"type": "response.create"})
 
+    async def set_voice(self, voice: str) -> None:
+        """Switch voice for the rest of the call.
+
+        The API refuses this once the current response has produced audio, so
+        a change made while the agent is mid-sentence is rejected and logged
+        rather than applied. Pick before speaking, or between turns.
+        """
+        self._voice = voice
+        await self._send(
+            {
+                "type": "session.update",
+                "session": {
+                    "type": "realtime",
+                    "audio": {"output": {"voice": voice}},
+                },
+            }
+        )
+
     # ── plumbing ──────────────────────────────────────────────────────────
 
     async def _say(self, role: str, text: str) -> None:

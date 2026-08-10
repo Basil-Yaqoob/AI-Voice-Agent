@@ -42,7 +42,7 @@ from livekit import rtc
 from livekit.agents import AutoSubscribe, JobContext
 
 from agent.config import Settings, get_settings
-from agent.main import VoiceAgent, open_database
+from agent.main import SELECTABLE_VOICES, VoiceAgent, open_database
 from agent.telemetry.logging import get_logger
 from agent.transport import realtime as realtime_module
 from agent.transport.sink import LiveKitSink
@@ -156,6 +156,26 @@ async def _run_realtime(
         sink=sink,
         publish=agent.publish,
     )
+
+    # Held so the event loop cannot garbage-collect a switch mid-flight.
+    pending: set[asyncio.Task[None]] = set()
+
+    def _on_data(packet: Any) -> None:
+        try:
+            payload = json.loads(bytes(packet.data).decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            return
+        if payload.get("type") != "set_voice":
+            return
+        voice = str(payload.get("voice", ""))
+        if voice not in SELECTABLE_VOICES:
+            log.warning("unknown_voice_ignored", voice=voice[:40])
+            return
+        task = asyncio.create_task(session.set_voice(voice))
+        pending.add(task)
+        task.add_done_callback(pending.discard)
+
+    room.on("data_received", _on_data)
 
     agent.begin()
     log.info(
