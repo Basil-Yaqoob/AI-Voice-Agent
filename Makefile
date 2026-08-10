@@ -2,7 +2,7 @@
 # Windows has no `make` by default — make.cmd mirrors these targets.
 # Keep the two in sync; tests/unit/test_task_runner.py enforces it.
 
-.PHONY: help dev down vendor test test-unit test-integration test-latency test-contract lint fmt eval ingest prerender dataset db data demo
+.PHONY: help dev down vendor test test-unit test-integration test-latency test-contract lint fmt eval ingest prerender dataset db data demo serve stop
 
 help:
 	@echo "dev              start Postgres + Redis"
@@ -22,6 +22,8 @@ help:
 	@echo "data             dataset + db"
 	@echo "vendor           re-download the LiveKit browser client"
 	@echo "demo             run the agent worker"
+	@echo "serve            run the control plane on :8000 (the demo page)"
+	@echo "stop             stop the worker and the control plane"
 
 dev:
 	docker compose up -d
@@ -80,3 +82,12 @@ data: dataset db
 
 demo:
 	uv run python -m agent.main dev
+
+serve:
+	uv run uvicorn agent.api.server:create_app --factory --port 8000
+
+# Leading '-' on each line: pkill exits 1 when nothing matched, and "already
+# stopped" is a success for this target, not a failure.
+stop:
+	-pkill -f "agent.main dev"
+	-pkill -f "agent.api.server"

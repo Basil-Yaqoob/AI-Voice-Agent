@@ -25,6 +25,8 @@ if /i "%TARGET%"=="db"               goto db
 if /i "%TARGET%"=="data"             goto data
 if /i "%TARGET%"=="vendor"           goto vendor
 if /i "%TARGET%"=="demo"             goto demo
+if /i "%TARGET%"=="serve"            goto serve
+if /i "%TARGET%"=="stop"             goto stop
 goto unknown
 
 :help
@@ -45,6 +47,8 @@ echo db               load the spreadsheet into SQLite
 echo data             dataset + db
 echo vendor           re-download the LiveKit browser client
 echo demo             run the agent worker
+echo serve            run the control plane on :8000 (the demo page)
+echo stop             stop the worker and the control plane
 goto :eof
 
 :dev
@@ -120,6 +124,16 @@ goto :eof
 
 :demo
 uv run python -m agent.main dev || exit /b 1
+goto :eof
+
+:serve
+uv run uvicorn agent.api.server:create_app --factory --port 8000 || exit /b 1
+goto :eof
+
+:stop
+REM No error if nothing is running - "already stopped" is the desired state.
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name like '%%python%%'\" | Where-Object { $_.CommandLine -match 'agent.main dev|agent.api.server' } | ForEach-Object { Write-Output ('stopping ' + $_.ProcessId); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+echo worker and control plane stopped
 goto :eof
 
 :unknown
