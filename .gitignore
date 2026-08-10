@@ -12,3 +12,8 @@ eval/out/
 
 # Session transcript copy is large; keep the memory note, drop the raw log.
 .claude/session-transcript-*.jsonl
+
+# SQLite sidecars: WAL journal and shared-memory index, plus the builder staging file.
+*.db-wal
+*.db-shm
+*.db.tmp

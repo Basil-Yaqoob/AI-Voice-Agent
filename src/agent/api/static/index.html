@@ -71,6 +71,14 @@
       <button id="connect">Connect</button>
       <span class="state"><span class="dot" id="dot"></span><span id="state">idle</span></span>
       <span style="flex:1"></span>
+      <label for="caller">Calling as</label>
+      <select id="caller">
+        <option value="03001234567">Ayesha Khan — gold, diabetic, penicillin allergy</option>
+        <option value="03219876543">Muhammad Bilal — order held for prescription</option>
+        <option value="03331122334">Fatima Siddiqui — refund in progress</option>
+        <option value="03451239876">Owais Rehman — Peshawar, courier only</option>
+        <option value="">Unknown number — new customer</option>
+      </select>
       <label for="voice">Voice</label>
       <select id="voice">
         <option value="ur-PK-UzmaNeural">Uzma (female)</option>
@@ -78,6 +86,8 @@
       </select>
     </div>
     <p class="error" id="error" hidden></p>
+    <p class="note">Stands in for the number a phone call would assert. It decides whose
+       orders the agent can see — pick one before connecting.</p>
   </div>
 
   <div class="panel">

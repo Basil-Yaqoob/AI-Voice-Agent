@@ -24,12 +24,36 @@ class FakeSink:
         self.stopped_at: float | None = None
         self.last_play_at: float | None = None
 
+        # Lets a barge-in test wait for audio to actually reach the caller
+        # instead of sleeping and hoping. Wall-clock sleeps in a test are a
+        # promise about how fast the machine is, and a loaded CI box breaks it.
+        self.utterances = 0
+        self._played_something = asyncio.Event()
+
     async def play(self, chunks: AsyncIterator[bytes]) -> None:
         async for chunk in chunks:
             self.played.append(chunk)
             self.last_play_at = time.perf_counter()
+            self._played_something.set()
             if self._chunk_delay_ms:
                 await asyncio.sleep(self._chunk_delay_ms / 1000)
+        self.utterances += 1
+
+    async def wait_for_audio(self, *, timeout: float = 5.0) -> None:
+        """Block until at least one chunk has been played."""
+        await asyncio.wait_for(self._played_something.wait(), timeout)
+
+    async def wait_for_utterances(self, count: int, *, timeout: float = 5.0) -> None:
+        """Block until ``count`` complete utterances have finished playing.
+
+        One utterance is one sentence through the chunker, so this is how a
+        test says "let the caller hear the first sentence and no more".
+        """
+        async def _poll() -> None:
+            while self.utterances < count:
+                await asyncio.sleep(0.001)
+
+        await asyncio.wait_for(_poll(), timeout)
 
     async def stop(self) -> None:
         self.stop_calls += 1

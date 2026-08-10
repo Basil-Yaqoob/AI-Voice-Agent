@@ -12,6 +12,7 @@ const els = {
   dot: document.getElementById('dot'),
   error: document.getElementById('error'),
   voice: document.getElementById('voice'),
+  caller: document.getElementById('caller'),
   latency: document.getElementById('latency'),
   breakdown: document.getElementById('breakdown'),
   transcript: document.getElementById('transcript'),
@@ -83,9 +84,18 @@ async function connect() {
   setState('connecting');
 
   try {
-    const res = await fetch('/api/token', { method: 'POST' });
+    // The caller number goes to the server, which signs it into the token
+    // identity. Sending it from the page on every request instead would let
+    // anyone with the console read out someone else's orders.
+    const res = await fetch('/api/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caller_phone: els.caller.value || null }),
+    });
     if (!res.ok) throw new Error('token endpoint returned ' + res.status);
     const { token, url } = await res.json();
+
+    els.caller.disabled = true;
 
     room = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
     room.on(LivekitClient.RoomEvent.DataReceived, onData);
@@ -94,6 +104,7 @@ async function connect() {
       els.connect.disabled = false;
       els.connect.textContent = 'Connect';
       els.connect.classList.remove('stop');
+      els.caller.disabled = false;
       room = null;
     });
 

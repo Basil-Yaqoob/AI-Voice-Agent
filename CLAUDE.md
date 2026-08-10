@@ -4,9 +4,11 @@ Auto-loaded context for this project. Keep it tight — it costs tokens on every
 
 ## What this is
 
-A production Urdu/English voice agent for Pakistani customers. Greenfield as of 8 Aug 2026 — **docs are complete, no code written yet.**
+A production Urdu/English voice agent for Pakistani customers. **All fourteen tasks built as of 10 Aug 2026** — 648 tests passing, lint clean.
 
-**Read `HANDOFF.md` first if you are a fresh session.** Then `README.md` for the task board.
+Deployed against a client: **DVAGO**, a pharmacy chain. Persona in `agent/language/personas.py`, policy corpus in `knowledge/dvago/`, business data in `data/dvago/dvago.db` behind eight tools in `agent/tools/dvago_backend.py`.
+
+**Read `README.md` first** for current status; `HANDOFF.md` for the deferred items that still need a human.
 
 ## Target profile (decided, do not re-litigate)
 
@@ -31,7 +33,8 @@ A production Urdu/English voice agent for Pakistani customers. Greenfield as of 
 | STT | Deepgram Nova-3 (`ur`) + keyterm prompting |
 | LLM | Claude, `claude-opus-5` default, swappable via `LLM_MODEL` |
 | TTS | Azure `ur-PK` ⇄ Inworld TTS-2, runtime failover |
-| Knowledge | Postgres 16 + pgvector, Redis answer cache |
+| Knowledge | Postgres 16 + pgvector, Redis answer cache. **Unused by DVAGO — its corpus fits the cached prefix** |
+| Client business data | SQLite on a thread pool, built from an Excel workbook (`make data`) |
 | API / UI | FastAPI + vanilla HTML with vendored LiveKit JS (no build step) |
 | Tests | pytest, pytest-asyncio, ruff, mypy, import-linter |
 
@@ -62,6 +65,9 @@ output_config={"effort": "low"}    # low | medium — never high
 - Azure region must be `southeastasia`, not a US region (~200ms difference).
 - After barge-in, record what was **spoken**, not what was intended.
 - Railway has no India region — fine for control plane, never for media workers.
+- `PRAGMA foreign_keys` is **per connection**. Set it only at build time and every bad write passes silently.
+- The caller's phone number comes off the signed participant identity, **never** from a tool argument or the conversation. No tool takes a phone parameter; a test enforces it.
+- Four files in `knowledge/dvago/` are `Status: PLACEHOLDER` invented policy. They read as real — replace before any real caller.
 
 ## Conventions
 

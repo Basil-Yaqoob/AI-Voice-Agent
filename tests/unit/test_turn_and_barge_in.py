@@ -78,7 +78,10 @@ async def test_history_records_spoken_not_intended() -> None:
     controller = InterruptController(sink)
 
     controller.track(asyncio.create_task(runner.run([], system=SYSTEM)), runner)
-    await asyncio.sleep(0.09)  # long enough for sentence one, not all three
+    # Wait for the event, not the clock: the caller has heard sentence one and
+    # nothing after it. A fixed sleep here is a bet on machine speed that a
+    # loaded test run loses.
+    await sink.wait_for_utterances(1)
     partial = await controller.interrupt()
 
     assert partial is not None, "the spoken record was lost on cancellation"
@@ -95,7 +98,7 @@ async def test_spoken_record_survives_cancellation() -> None:
     runner = _runner(llm, sink)
 
     task = asyncio.create_task(runner.run([], system=SYSTEM))
-    await asyncio.sleep(0.09)
+    await sink.wait_for_audio()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -112,7 +115,7 @@ async def test_controller_stops_audio_before_cancelling() -> None:
     controller = InterruptController(sink)
 
     controller.track(asyncio.create_task(runner.run([], system=SYSTEM)))
-    await asyncio.sleep(0.05)
+    await sink.wait_for_audio()
     await controller.interrupt()
 
     assert sink.stop_calls == 1
@@ -128,7 +131,7 @@ async def test_interrupt_cancels_the_llm_stream() -> None:
     controller = InterruptController(sink)
 
     controller.track(asyncio.create_task(_runner(llm, sink).run([], system=SYSTEM)))
-    await asyncio.sleep(0.05)
+    await sink.wait_for_audio()
     await controller.interrupt()
 
     assert llm.cancelled is True
@@ -141,7 +144,7 @@ async def test_interrupt_within_budget() -> None:
     llm = FakeLLM(script=[THREE_SENTENCES], tokens_per_sec=60)
     controller = InterruptController(sink)
     controller.track(asyncio.create_task(_runner(llm, sink).run([], system=SYSTEM)))
-    await asyncio.sleep(0.04)
+    await sink.wait_for_audio()
 
     start = time.perf_counter()
     await controller.interrupt()
@@ -155,9 +158,9 @@ async def test_no_task_leak_after_interrupt() -> None:
     llm = FakeLLM(script=[THREE_SENTENCES], tokens_per_sec=30)
     controller = InterruptController(sink)
     controller.track(asyncio.create_task(_runner(llm, sink).run([], system=SYSTEM)))
-    await asyncio.sleep(0.03)
+    await sink.wait_for_audio()
     await controller.interrupt()
-    await asyncio.sleep(0.02)
+    await asyncio.sleep(0.02)  # let cancelled tasks finish unwinding
     assert len(asyncio.all_tasks()) <= before + 1
 
 

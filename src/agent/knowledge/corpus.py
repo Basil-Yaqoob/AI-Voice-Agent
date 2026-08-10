@@ -15,11 +15,18 @@ Retrieval is the fallback for corpora too large to cache, not the default.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from agent.language.prompts import MIN_CACHEABLE_CHARS
 
-__all__ = ["CHARS_PER_TOKEN", "MAX_CACHED_CORPUS_TOKENS", "CorpusPlan", "plan_for_corpus"]
+__all__ = [
+    "CHARS_PER_TOKEN",
+    "MAX_CACHED_CORPUS_TOKENS",
+    "CorpusPlan",
+    "load_corpus_dir",
+    "plan_for_corpus",
+]
 
 # Rough English-dominant ratio. Urdu script tokenises *denser* — more tokens per
 # character — so dividing by 4 UNDER-counts an Urdu corpus and errs toward
@@ -46,6 +53,30 @@ class CorpusPlan:
 
 def estimate_tokens(corpus: str) -> int:
     return len(corpus) // CHARS_PER_TOKEN
+
+
+def load_corpus_dir(directory: Path) -> str:
+    """Concatenate a corpus directory into one deterministic block of text.
+
+    Sorted by filename, because the result goes into the cached prompt prefix
+    and directory iteration order is not guaranteed to be stable across
+    machines. A prefix whose bytes reorder between processes stops hitting the
+    cache, and nothing about that failure is visible except the bill.
+
+    ``README.md`` is excluded: it documents the corpus for whoever maintains
+    it, and shipping "replace this before production" to the model as if it
+    were company knowledge would be worse than useless.
+
+    Synchronous, and called once at startup. Never call it from the hot path.
+    """
+    if not directory.is_dir():
+        return ""
+    files = sorted(
+        path
+        for path in directory.rglob("*")
+        if path.suffix in {".md", ".txt"} and path.name.lower() != "readme.md"
+    )
+    return "\n\n".join(path.read_text(encoding="utf-8").strip() for path in files)
 
 
 def plan_for_corpus(corpus: str) -> CorpusPlan:

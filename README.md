@@ -27,8 +27,18 @@ Production conversational AI for Pakistani customers — code-switched Urdu/Engl
 
 ## Status — 10 August 2026
 
-All thirteen tasks implemented. **475 tests passing, lint clean** (ruff, mypy
+All fourteen tasks implemented. **595 tests passing, lint clean** (ruff, mypy
 strict, import-linter).
+
+The agent is wired to a client deployment: **DVAGO**, a Pakistani pharmacy
+chain. It answers from a live SQLite database of stock, orders, complaints and
+refunds — 17 tables, ~6,350 rows, generated from an Excel workbook the client
+can edit. See [docs/14-DVAGO-DEMO-DATA.md](docs/14-DVAGO-DEMO-DATA.md).
+
+**All of that data is synthetic**, and four of the five policy documents in
+[knowledge/dvago/](knowledge/dvago/) are marked `PLACEHOLDER` — DVAGO's real
+return and refund terms could not be read from their site and must be pasted in
+before a real caller hears this.
 
 | Verified against live vendors | Result |
 |---|---|
@@ -87,6 +97,7 @@ Build order. Dependencies are listed in each file's header.
 | [11](docs/TASK-11-metrics-observability.md) | Latency metrics and observability | Intermediate | 1 d |
 | [12](docs/TASK-12-eval-harness.md) | Evaluation harness: pick model and voice | Advanced | 1.5 d |
 | [13](docs/TASK-13-demo-runbook.md) | Demo runbook | All | 0.5 d |
+| [14](docs/14-DVAGO-DEMO-DATA.md) | DVAGO demo data and live database | Intermediate | 1 d |
 
 **Total: roughly 3 weeks to a client-ready demo.**
 
@@ -118,6 +129,7 @@ Reasoning for each in [docs/01-TECH-DECISIONS.md](docs/01-TECH-DECISIONS.md).
 ```bash
 uv sync                    # install
 cp .env.example .env       # then fill in credentials
+make data                  # build the DVAGO spreadsheet + SQLite database
 make dev                   # Postgres + Redis
 make test                  # unit + integration
 make demo                  # run the agent
@@ -147,6 +159,9 @@ make lint             # ruff + mypy + import-linter
 make eval             # model & voice comparison report
 make ingest           # rebuild the knowledge index
 make prerender        # regenerate fixed audio assets
+make dataset          # regenerate the DVAGO spreadsheet (overwrites hand edits)
+make db               # load the spreadsheet into SQLite
+make data             # dataset + db
 make demo             # run the agent worker
 ```
 
@@ -177,4 +192,7 @@ Collected from the task docs — the failures that are silent, expensive, or dem
 - **Echo on laptop speakers** makes the agent interrupt itself in a loop. Wear a headset at the demo.
 - **Disabling thinking to save latency** silently drops tool calls into visible text. Use `adaptive` + `effort: low`.
 - **Recording intended rather than spoken text** after barge-in makes the agent reference things the caller never heard.
+- **`PRAGMA foreign_keys` is per connection.** Set it when building the database and it is off again on the next connect — every bad write then passes silently.
+- **`make dataset` before a demo** regenerates the population and overwrites hand-edited cells. Use `make db` alone after editing the workbook.
+- **Placeholder policy text reads as real.** Four files in `knowledge/dvago/` commit DVAGO to terms they never agreed. Replace them.
 - **Carrier licensing takes longer than the entire build.** Start it in week 0.

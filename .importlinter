@@ -12,11 +12,22 @@ source_modules =
     agent.knowledge
     agent.interfaces
     agent.telemetry
+    agent.data
 forbidden_modules =
     anthropic
     openai
     deepgram
     azure
+
+[importlinter:contract:data-layer-is-generic]
+name = The database adapter must not know which business it serves
+type = forbidden
+source_modules =
+    agent.data
+forbidden_modules =
+    agent.tools
+    agent.pipeline
+    agent.providers
 
 [importlinter:contract:interfaces-are-pure]
 name = Interfaces must not depend on implementations

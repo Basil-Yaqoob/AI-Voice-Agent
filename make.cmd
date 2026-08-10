@@ -20,6 +20,9 @@ if /i "%TARGET%"=="fmt"              goto fmt
 if /i "%TARGET%"=="eval"             goto eval
 if /i "%TARGET%"=="ingest"           goto ingest
 if /i "%TARGET%"=="prerender"        goto prerender
+if /i "%TARGET%"=="dataset"          goto dataset
+if /i "%TARGET%"=="db"               goto db
+if /i "%TARGET%"=="data"             goto data
 if /i "%TARGET%"=="vendor"           goto vendor
 if /i "%TARGET%"=="demo"             goto demo
 goto unknown
@@ -37,6 +40,9 @@ echo fmt              format and autofix
 echo eval             model and voice comparison
 echo ingest           rebuild knowledge index
 echo prerender        regenerate fixed audio assets
+echo dataset          regenerate the DVAGO spreadsheet
+echo db               load the spreadsheet into SQLite
+echo data             dataset + db
 echo vendor           re-download the LiveKit browser client
 echo demo             run the agent worker
 goto :eof
@@ -97,6 +103,19 @@ goto :eof
 
 :prerender
 uv run python -m agent.tools.prerender || exit /b 1
+goto :eof
+
+:dataset
+uv run python scripts/generate_dvago_dataset.py || exit /b 1
+goto :eof
+
+:db
+uv run python scripts/build_dvago_db.py || exit /b 1
+goto :eof
+
+:data
+call "%~f0" dataset || exit /b 1
+call "%~f0" db || exit /b 1
 goto :eof
 
 :demo

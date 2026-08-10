@@ -118,9 +118,15 @@ def test_keyterms_within_limit() -> None:
 
 
 def test_keyterms_preserve_order() -> None:
-    """Product names lead so they survive truncation."""
+    """Brand names lead so they survive truncation.
+
+    A generic noun like "order" is mostly recovered by context anyway. A brand
+    name is not: nothing in the sentence tells Deepgram that "banadol" was
+    meant to be Panadol.
+    """
     terms = load_keyterms()
-    assert terms.index("Acme") < terms.index("order")
+    assert terms.index("DVAGO") < terms.index("order")
+    assert terms.index("Panadol") < terms.index("prescription")
 
 
 def test_missing_keyterm_file_returns_empty(tmp_path: Path) -> None:
@@ -129,4 +135,5 @@ def test_missing_keyterm_file_returns_empty(tmp_path: Path) -> None:
 
 
 def test_keyterms_include_multiword_product_names() -> None:
-    assert "Premium Plan" in load_keyterms()
+    assert "Nan Pro" in load_keyterms()
+    assert "cash on delivery" in load_keyterms()

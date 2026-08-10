@@ -17,10 +17,11 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from agent.api.identity import identity_for
 from agent.config import Settings, get_settings
 from agent.telemetry.logging import get_logger
 
-__all__ = ["TokenResponse", "create_app"]
+__all__ = ["TokenRequest", "TokenResponse", "create_app"]
 
 log = get_logger(__name__)
 
@@ -31,10 +32,23 @@ STATIC_DIR = Path(__file__).parent / "static"
 TOKEN_TTL = timedelta(minutes=30)
 
 
+class TokenRequest(BaseModel):
+    """What the demo page sends.
+
+    ``caller_phone`` stands in for the number a SIP INVITE would assert. It
+    decides whose orders the agent can see, so it is minted into the token
+    here, server-side, and never taken from anything the browser can change
+    afterwards.
+    """
+
+    caller_phone: str | None = None
+
+
 class TokenResponse(BaseModel):
     token: str
     url: str
     room: str
+    identity: str
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -45,11 +59,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return settings or get_settings()
 
     @app.post("/api/token", response_model=TokenResponse)
-    async def mint_token() -> TokenResponse:
+    async def mint_token(request: TokenRequest | None = None) -> TokenResponse:
         """Short-lived LiveKit join token.
 
         The browser must never see the API secret; that is the whole reason
         this endpoint exists rather than embedding credentials in the page.
+
+        The caller's number is baked into the signed identity rather than sent
+        separately, so the worker can trust it: changing it means forging a
+        token. In production it comes from the SIP INVITE and this parameter
+        goes away.
         """
         s = _settings()
         secret = s.livekit_api_secret.get_secret_value()
@@ -58,8 +77,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(503, "LiveKit credentials are not configured")
 
         room = f"demo-{uuid4().hex[:8]}"
-        identity = f"caller-{uuid4().hex[:6]}"
-        return TokenResponse(token=_jwt(key, secret, room, identity), url=s.livekit_url, room=room)
+        identity = identity_for(request.caller_phone if request else None)
+        return TokenResponse(
+            token=_jwt(key, secret, room, identity),
+            url=s.livekit_url,
+            room=room,
+            identity=identity,
+        )
 
     @app.get("/health")
     async def health() -> dict[str, object]:

@@ -41,12 +41,17 @@ D:\AI Voice Agent\
 │   └── session-transcript-2026-08-08.jsonl
 └── docs/
     ├── 00-ARCHITECTURE.md      module layout, data flow, hot-path rules
-    ├── 01-TECH-DECISIONS.md    7 decisions, each with rejected alternatives
+    ├── 01-TECH-DECISIONS.md    11 decisions, each with rejected alternatives
     ├── 02-TESTING-STRATEGY.md  how to test an audio-in/audio-out system
-    └── TASK-01 … TASK-13       one file per task
+    └── TASK-01 … TASK-14       one file per task
 ```
 
-~4,400 lines of documentation. No `src/`, no `tests/`, no `pyproject.toml` yet.
+**Updated 10 Aug 2026:** the code exists now. `src/agent/` holds the full
+pipeline, `tests/` holds 595 passing tests, and the agent is wired to the DVAGO
+deployment — persona, policy corpus, eight tools and a SQLite business database
+in `data/dvago/`. `make data` builds the database; `make demo` runs the agent.
+The current status table lives in `README.md`; the rest of this file is the
+8 Aug planning snapshot plus the deferred items below, which are still open.
 
 There is also a web version of the research document:
 https://claude.ai/code/artifact/1ba0c6c7-d3bd-4592-9cae-79768e9f72f3
@@ -136,6 +141,27 @@ recording session.
 Until this is done, treat the 180ms endpointing slice of the latency budget as
 an estimate rather than a measurement.
 
+### DVAGO's policy text is placeholder
+
+**Status:** unavoidable as of 10 Aug 2026, and the highest-risk open item.
+
+`knowledge/dvago/` holds what the agent knows without asking the database. One
+file is drawn from DVAGO's public site and is marked `Status: public`. **Four
+are partly or wholly invented and marked `Status: PLACEHOLDER`** — most
+seriously `04-returns-refunds-complaints.md`, which is placeholder end to end.
+
+DVAGO publishes a return policy, a refund policy and an FAQ set at
+`dvago.pk/policies` and `dvago.pk/faqs`, but those pages render client-side and
+the text could not be read automatically. What is there instead is a plausible
+Pakistani pharmacy policy, which is precisely the problem: it reads as real.
+
+**An agent that quotes a 48-hour return window DVAGO does not offer creates a
+commitment somebody then has to honour or argue about.** The placeholders are
+fine for a rehearsal and unacceptable in front of a customer.
+
+**To close it:** ask DVAGO for the text behind those three pages, paste it in,
+delete the `Status:` line. Half an hour of work, entirely blocked on the client.
+
 ---
 
 ## Open items — not resolved, need action
@@ -148,8 +174,9 @@ an estimate rather than a measurement.
 | **Native Urdu speaker** | hiring | Needed for TASK-06 golden-file review (~1 hour) and TASK-12 quality scoring. Cheapest quality investment in the project. |
 | **Phone-line audio corpus** | data | TASK-09 needs 30–50 labelled utterances recorded over a real phone line, not a laptop mic. |
 | **Urdu STT accuracy** | unknown | No public WER benchmarks comparing Deepgram/Whisper/Azure for Urdu exist. Must be measured on your own audio. |
-| **Client identity** | unknown | Never specified. Knowledge base content and tool integrations depend on it. |
-| **Exact corpus size** | unknown | Determines whether TASK-07 needs RAG at all — under ~40k tokens, the cached-prefix route wins on both latency and cost. |
+| **Real DVAGO policy text** | client | See below. The four placeholder files are the highest-risk item on this list that code can fix. |
+| **~~Client identity~~** | ✅ resolved 10 Aug 2026 | DVAGO, a Pakistani pharmacy chain. Knowledge corpus, tools and demo database all built against it — TASK-14. |
+| **~~Exact corpus size~~** | ✅ resolved 10 Aug 2026 | ~2,570 tokens; assembled prefix ~3,940. Far below the 40k ceiling, so **this deployment needs no RAG** — the cached prefix wins on both latency and cost. pgvector stays built for when the client hands over their full policy library. |
 
 ---
 

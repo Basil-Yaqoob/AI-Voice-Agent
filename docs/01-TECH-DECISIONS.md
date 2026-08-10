@@ -257,6 +257,30 @@ Two Windows details that cost real debugging time and are easy to reintroduce:
 
 ---
 
+## DECISION 11 — Client business data: SQLite behind a tool, not Postgres, not RAG
+
+*Recorded during TASK-14, 10 Aug 2026.*
+
+**Chosen:** stdlib `sqlite3` on a thread pool, fed from an Excel workbook the client edits.
+**Rejected:** putting the business data in the existing Postgres; putting it in the retrieval index; adding `aiosqlite`.
+
+Three separate calls, so three separate reasons.
+
+**Why a database at all, rather than retrieval.** The rule already written into `agent/tools/registry.py` decides it: retrieval is for knowledge, tools are for anything that changes. Stock, order status and refund state differ between two calls an hour apart. Embed them and the agent quotes yesterday's stock with total confidence, which is worse than not knowing. The split is by rate of change, not by subject.
+
+**Why not the Postgres we already run.** It is there for pgvector, and it is a container the client has to be running. The demo database is a file: it clones with the repo, needs no `make dev`, and cannot be the reason a client demo fails in a meeting room with bad wifi. It is also the layer most likely to be deleted — the real integration replaces `dvago_backend.py` with DVAGO's own APIs — so the cheaper it is to remove, the better. An import-linter contract keeps `agent.data` from learning anything about DVAGO so that removal stays clean.
+
+**Why not `aiosqlite`.** `sqlite3` is synchronous and hot-path rule 1 forbids blocking, so it needs a thread either way. `aiosqlite` is that thread plus a dependency; `run_in_executor` is that thread and the same pattern already used for the Azure Speech SDK, which is synchronous for the same reason. No new dependency, one fewer thing to explain.
+
+**Why Excel as the source.** The client can open it, and a spreadsheet is the format a pharmacy already keeps stock lists in. `src/agent/data/schema.sql` stays authoritative — the workbook, the loader and the data dictionary all derive from it, and tests fail the build if they diverge. `openpyxl` is added as a **dev dependency only**: it generates and loads the workbook offline and is never imported by the running agent.
+
+Two SQLite specifics that cost debugging time and will be reintroduced by anyone who does not know:
+
+- **`PRAGMA foreign_keys` is per connection, not per database.** Set it when building the file and it is off again on the next connect, and every bad write passes silently.
+- **`PRAGMA journal_mode = WAL` takes an exclusive lock that `busy_timeout` does not cover.** SQLite returns `SQLITE_BUSY` immediately rather than invoking the busy handler, so threads racing to connect collide. Connection setup is serialised behind a lock — it happens once per thread and never on the hot path.
+
+---
+
 ## Final stack
 
 | Layer                 | Choice                                              | Why in one line                                             |
@@ -276,6 +300,7 @@ Two Windows details that cost real debugging time and are easy to reintroduce:
 | Lint / types          | ruff + mypy                                         | Catches blocking calls on the hot path                      |
 | Local infra           | Docker Compose                                      | Postgres + Redis with one command                           |
 | Task runner           | Makefile +`make.cmd` shim                         | `make` is absent on Windows; no new dependency              |
+| Client business data  | SQLite on a thread pool, built from Excel           | Clones with the repo; the layer most likely to be replaced  |
 
 ---
 
@@ -292,3 +317,6 @@ Two Windows details that cost real debugging time and are easy to reintroduce:
 | Pinecone / Weaviate                   | pgvector                       | Extra network hop we cannot afford                               |
 | ElevenLabs for Urdu                   | Azure / Inworld                | Flash v2.5 has no Urdu; v3 cannot run real-time                  |
 | Railway for media workers             | Mumbai/UAE region host         | No India region; +60–90ms is 8–11% of budget                   |
+| Business data in the retrieval index  | SQLite behind a tool           | Stock and order state change hourly; embedded, they go stale silently |
+| Postgres for the demo business data   | SQLite file                    | Clones with the repo; no container to fail in a client meeting   |
+| `aiosqlite`                           | `run_in_executor`              | Same thread, one more dependency; matches the Azure SDK pattern  |

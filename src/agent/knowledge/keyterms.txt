@@ -2,48 +2,95 @@
 #
 # The cheapest accuracy win available. Without these, English nouns inside an
 # Urdu sentence get mangled - and those are exactly the words the intent hangs
-# on ("order", "tracking", a plan name).
+# on (a brand name, "order", "prescription").
 #
 # Two rules learned the hard way:
 #   1. Keep the list to 40-60 high-value terms. An over-broad list biases the
 #      model toward these words even when they were not said.
-#   2. List what callers actually say, not what the brochure calls it. If nobody
-#      says "subscription tier", leave it out.
+#   2. List what callers actually say, not what the brochure calls it.
+#
+# A pharmacy has more brand names than this list can ever hold, so there are
+# two layers and this is only the first. Keyterms cover the drugs callers ask
+# for most; everything else is caught downstream by products.search_terms,
+# which carries the misspellings a transcript actually produces. Adding the
+# whole catalogue here would make recognition worse, not better.
 #
 # Lines starting with # and blank lines are ignored.
 
-# ── Product and brand names (highest value) ──────────────────────────
-Acme
-Acme Pay
-Premium Plan
-Basic Plan
-Unlimited Package
+# ── The company ──────────────────────────────────────────────────────
+DVAGO
+
+# ── The brands callers ask for by name, most-said first ──────────────
+# Chosen for how often they are said AND how badly they transcribe. Panadol
+# comes back as "panadole" or "banadol" constantly; so does Augmentin.
+Panadol
+Augmentin
+Brufen
+Calpol
+Disprin
+Risek
+Nexum
+Glucophage
+Amaryl
+Ventolin
+Lipitor
+Concor
+Norvasc
+Neurobion
+Surbex
+Flagyl
+Zyrtec
+Softin
+Motilium
+Gravinate
+Imodium
+Thyronorm
+Lantus
+Zithromax
+Velosef
+Cefspan
+Arinac
+Actifed
+Betnovate
+Dettol
+Joshanda
+Pampers
+Pediasure
+Ensure
+Cerelac
+Lactogen
+Nan Pro
+Accu-Chek
+
+# ── Pharmacy vocabulary ──────────────────────────────────────────────
+prescription
+pharmacist
+generic
+tablet
+capsule
+syrup
+injection
+inhaler
+sachet
+strip
+dosage
+expiry
+insulin
+refill
 
 # ── Everyday English nouns Pakistani callers use inside Urdu ─────────
 order
 delivery
-deliver
 tracking
-track
-account
-balance
-package
+branch
+rider
+courier
+pickup
 complaint
 refund
-invoice
-courier
-payment
-receipt
+account
 address
-booking
 cancel
-confirm
 status
-number
-internet
-data
-bundle
-recharge
-bill
-customer care
-helpline
+promo code
+cash on delivery

@@ -110,8 +110,9 @@ def test_empty_corpus_yields_nothing() -> None:
 
 
 def test_keywords_extracted_for_hybrid_search() -> None:
-    chunks = chunk_text("The Premium Plan includes unlimited data.", source="p.md")
-    assert "premium plan" in chunks[0].keywords or "premium" in " ".join(chunks[0].keywords)
+    """The keyword arm draws on the same list as STT, so both halves agree."""
+    chunks = chunk_text("Panadol is stocked at every branch.", source="p.md")
+    assert "panadol" in chunks[0].keywords
 
 
 # ── worker wiring ──────────────────────────────────────────────────────────────
@@ -125,22 +126,83 @@ def test_main_module_is_runnable() -> None:
     assert hasattr(main_module, "bootstrap")
 
 
-def test_demo_corpus_is_large_enough_to_cache() -> None:
+def test_fallback_corpus_is_large_enough_to_cache() -> None:
     """A prefix below the cache minimum bills at full input price on every
     request, with no error to tell you."""
     from agent.knowledge.corpus import plan_for_corpus
-    from agent.main import DEMO_CORPUS, DEMO_PERSONA
+    from agent.language.prompts import prefix_is_cacheable
+    from agent.main import FALLBACK_CORPUS, FALLBACK_PERSONA
 
     prefix = build_cached_prefix(
         company="Acme",
-        persona=DEMO_PERSONA,
-        corpus=DEMO_CORPUS,
+        persona=FALLBACK_PERSONA,
+        corpus=FALLBACK_CORPUS,
         tools=build_demo_registry().definitions(),
     )
-    from agent.language.prompts import prefix_is_cacheable
+    assert prefix_is_cacheable(prefix), f"fallback prefix is only {len(prefix)} chars"
+    assert not plan_for_corpus(FALLBACK_CORPUS).needs_retrieval
 
-    assert prefix_is_cacheable(prefix), f"demo prefix is only {len(prefix)} chars"
-    assert not plan_for_corpus(DEMO_CORPUS).needs_retrieval
+
+def test_dvago_prefix_caches_and_needs_no_retrieval() -> None:
+    """The deployment that actually ships.
+
+    Two properties, both worth money. The prefix must clear the cache minimum,
+    or every request bills at full input price. And the corpus must stay small
+    enough to live in that prefix: retrieval would add a 150-250ms round trip
+    the 800ms budget has nowhere to put, to answer questions the prefix already
+    answers for a tenth of the token price.
+    """
+    from pathlib import Path
+
+    from agent.data.sqlite import Database
+    from agent.knowledge.corpus import load_corpus_dir, plan_for_corpus
+    from agent.language.personas import DVAGO_COMPANY, DVAGO_PERSONA
+    from agent.language.prompts import prefix_is_cacheable
+    from agent.main import CORPUS_DIR
+    from agent.tools.dvago_backend import DvagoBackend, build_dvago_registry
+
+    corpus = load_corpus_dir(CORPUS_DIR)
+    assert corpus, f"no corpus at {CORPUS_DIR}"
+
+    plan = plan_for_corpus(corpus)
+    assert not plan.needs_retrieval, plan.reason
+
+    def prefix_for(caller: str | None) -> str:
+        registry = build_dvago_registry(
+            DvagoBackend(Database(Path("unused.db")), caller_phone=caller)
+        )
+        return build_cached_prefix(
+            company=DVAGO_COMPANY,
+            persona=DVAGO_PERSONA,
+            corpus=corpus,
+            tools=registry.definitions(),
+        )
+
+    prefix = prefix_for("03001234567")
+    assert prefix_is_cacheable(prefix), f"DVAGO prefix is only {len(prefix)} chars"
+
+    # The invariant that keeps the cache warm: identical bytes for every caller
+    # and every call. Who is on the phone belongs in the turn suffix. A fixed
+    # example order number inside the persona is fine — it never changes; a
+    # real caller's number would triple the bill with no visible symptom.
+    assert prefix == prefix_for("03219876543") == prefix_for(None)
+
+
+def test_corpus_loader_excludes_the_maintainers_readme() -> None:
+    """The README tells a human to replace the placeholders. The model must not read it."""
+    from agent.knowledge.corpus import load_corpus_dir
+    from agent.main import CORPUS_DIR
+
+    corpus = load_corpus_dir(CORPUS_DIR)
+    assert "Why there is no retrieval" not in corpus
+
+
+def test_corpus_loading_is_deterministic() -> None:
+    """Reordered bytes in the prefix mean a silent cache miss on every request."""
+    from agent.knowledge.corpus import load_corpus_dir
+    from agent.main import CORPUS_DIR
+
+    assert load_corpus_dir(CORPUS_DIR) == load_corpus_dir(CORPUS_DIR)
 
 
 def test_prerender_covers_every_recovery_line() -> None:

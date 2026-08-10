@@ -2,7 +2,7 @@
 # Windows has no `make` by default — make.cmd mirrors these targets.
 # Keep the two in sync; tests/unit/test_task_runner.py enforces it.
 
-.PHONY: help dev down vendor test test-unit test-integration test-latency test-contract lint fmt eval ingest prerender demo
+.PHONY: help dev down vendor test test-unit test-integration test-latency test-contract lint fmt eval ingest prerender dataset db data demo
 
 help:
 	@echo "dev              start Postgres + Redis"
@@ -17,6 +17,9 @@ help:
 	@echo "eval             model and voice comparison"
 	@echo "ingest           rebuild knowledge index"
 	@echo "prerender        regenerate fixed audio assets"
+	@echo "dataset          regenerate the DVAGO spreadsheet"
+	@echo "db               load the spreadsheet into SQLite"
+	@echo "data             dataset + db"
 	@echo "vendor           re-download the LiveKit browser client"
 	@echo "demo             run the agent worker"
 
@@ -64,6 +67,16 @@ vendor:
 
 prerender:
 	uv run python -m agent.tools.prerender
+
+# Regenerating overwrites hand-edited cells. Edit the workbook and run `make db`
+# alone; only run `dataset` when you want a fresh population.
+dataset:
+	uv run python scripts/generate_dvago_dataset.py
+
+db:
+	uv run python scripts/build_dvago_db.py
+
+data: dataset db
 
 demo:
 	uv run python -m agent.main dev

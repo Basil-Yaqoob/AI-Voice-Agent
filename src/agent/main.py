@@ -17,13 +17,17 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from agent.api.identity import phone_from_identity
 from agent.config import Settings, get_settings, validate_credentials
+from agent.data.sqlite import Database
 from agent.interfaces.llm import CachedPrompt, Message
-from agent.knowledge.corpus import plan_for_corpus
+from agent.knowledge.corpus import load_corpus_dir, plan_for_corpus
 from agent.knowledge.keyterms import load_keyterms
+from agent.language.personas import DVAGO_COMPANY, DVAGO_PERSONA
 from agent.language.prompts import build_cached_prefix, prefix_is_cacheable
 from agent.pipeline.endpointing import AdaptiveEndpointer, BargeInDetector
 from agent.pipeline.interrupt import InterruptController
@@ -33,27 +37,47 @@ from agent.providers.registry import build_llm, build_stt, build_tts
 from agent.telemetry.logging import configure_logging, get_logger
 from agent.telemetry.metrics import TurnMetrics
 from agent.tools.demo_backend import build_demo_registry
+from agent.tools.dvago_backend import DvagoBackend, build_dvago_registry
 
-__all__ = ["VoiceAgent", "bootstrap", "main"]
+__all__ = ["CORPUS_DIR", "DVAGO_DB", "VoiceAgent", "bootstrap", "main"]
 
 log = get_logger(__name__)
 
-DEMO_PERSONA = "You are Acme's customer support agent, taking calls from Pakistani customers."
-DEMO_CORPUS = """
+# The client deployment. Both are built by:
+#   uv run python scripts/generate_dvago_dataset.py
+#   uv run python scripts/build_dvago_db.py
+DVAGO_DB = Path("data/dvago/dvago.db")
+CORPUS_DIR = Path("knowledge/dvago")
+
+# Fallback when the DVAGO corpus has not been built yet, so `make demo` still
+# starts and says something useful rather than failing on a missing directory.
+FALLBACK_PERSONA = "You are Acme's customer support agent, taking calls from Pakistani customers."
+FALLBACK_CORPUS = """
 Acme sells prepaid internet packages across Pakistan.
 Delivery takes two to three working days in major cities, four to five elsewhere.
 The Premium Plan is 2500 rupees a month and includes unlimited data.
-The Basic Plan is 1200 rupees a month and includes 50 GB.
 Refunds are processed within seven working days of approval.
-Customer care is open 9am to 9pm, seven days a week.
-Delivery is free on orders above 2000 rupees.
 """
 
 
 class VoiceAgent:
-    """One call: audio in, audio out, with barge-in and metrics."""
+    """One call: audio in, audio out, with barge-in and metrics.
 
-    def __init__(self, settings: Settings, room: Any, sink: Any) -> None:
+    ``caller_phone`` is the caller's identity for the whole call. In production
+    it comes off the SIP INVITE; on the demo page it is typed in. It is handed
+    to the tool backend once and never exposed as a tool argument, so the model
+    cannot be talked into fetching somebody else's orders.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        room: Any,
+        sink: Any,
+        *,
+        caller_phone: str | None = None,
+        database: Database | None = None,
+    ) -> None:
         self._settings = settings
         self._room = room
         self._sink = sink
@@ -61,7 +85,18 @@ class VoiceAgent:
         self._stt = build_stt(settings)
         self._tts = build_tts(settings)
         self._llm = build_llm(settings)
-        self._tools = build_demo_registry()
+
+        self._db = database
+        if self._db is not None:
+            company = DVAGO_COMPANY
+            persona = DVAGO_PERSONA
+            corpus = load_corpus_dir(CORPUS_DIR)
+            self._tools = build_dvago_registry(
+                DvagoBackend(self._db, caller_phone=caller_phone)
+            )
+        else:
+            company, persona, corpus = "Acme", FALLBACK_PERSONA, FALLBACK_CORPUS
+            self._tools = build_demo_registry()
 
         self._state = StateMachine()
         self._endpointer = AdaptiveEndpointer(base_ms=settings.endpoint_silence_ms)
@@ -75,9 +110,9 @@ class VoiceAgent:
 
         self._system = CachedPrompt(
             prefix=build_cached_prefix(
-                company="Acme",
-                persona=DEMO_PERSONA,
-                corpus=DEMO_CORPUS,
+                company=company,
+                persona=persona,
+                corpus=corpus,
                 tools=self._tools.definitions(),
             )
         )
@@ -174,9 +209,38 @@ class VoiceAgent:
         """Live voice switch for the demo A/B."""
         self._voice = voice
 
+    @staticmethod
+    def caller_phone_from(participant: Any) -> str | None:
+        """Read the caller's number off the participant that joined.
+
+        The number is in the signed token identity, so changing it means
+        forging a token — which is the property that lets the agent answer
+        questions about someone's orders at all. Never take it from anything
+        said during the conversation.
+        """
+        return phone_from_identity(getattr(participant, "identity", None))
+
     @property
     def keyterms(self) -> list[str]:
         return load_keyterms()
+
+
+def open_database(path: Path = DVAGO_DB) -> Database | None:
+    """The DVAGO database if it has been built, otherwise None.
+
+    Missing is not fatal. A fresh clone has no database until the dataset is
+    generated, and an agent that refuses to start is harder to diagnose than
+    one that starts and says which command is missing.
+    """
+    if not path.exists():
+        log.warning(
+            "dvago_database_missing",
+            path=str(path),
+            fix="uv run python scripts/generate_dvago_dataset.py "
+                "&& uv run python scripts/build_dvago_db.py",
+        )
+        return None
+    return Database(path)
 
 
 def bootstrap() -> Settings:
@@ -185,7 +249,8 @@ def bootstrap() -> Settings:
     configure_logging(settings.log_level)
     validate_credentials(settings)
 
-    plan = plan_for_corpus(DEMO_CORPUS)
+    corpus = load_corpus_dir(CORPUS_DIR) or FALLBACK_CORPUS
+    plan = plan_for_corpus(corpus)
     log.info(
         "bootstrap_complete",
         env=settings.env,
@@ -194,6 +259,9 @@ def bootstrap() -> Settings:
         llm=settings.llm_provider,
         model=settings.resolved_llm_model,
         corpus_strategy=plan.strategy,
+        corpus_tokens=plan.corpus_tokens,
+        corpus_reason=plan.reason,
+        database="present" if DVAGO_DB.exists() else "MISSING",
     )
     return settings
 
