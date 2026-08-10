@@ -71,6 +71,10 @@ SELECTABLE_VOICES = frozenset({
     # Azure ur-PK (VOICE_MODE=pipeline)
     "ur-PK-UzmaNeural",
     "ur-PK-AsadNeural",
+    # Upliftai (VOICE_MODE=pipeline, TTS_PROVIDER=uplift)
+    "broadband-support",
+    "helpdesk-agent",
+    "female-narrator",
 })
 
 FALLBACK_CORPUS = """
@@ -127,7 +131,7 @@ class VoiceAgent:
         self._history: list[Message] = []
         self._call_id = f"call_{uuid4().hex[:8]}"
         self._turn_index = 0
-        self._voice = settings.tts_voice_urdu
+        self._voice = settings.default_voice
 
         self._system = CachedPrompt(
             prefix=build_cached_prefix(

@@ -81,6 +81,17 @@ def build_tts(settings: Settings) -> TTSProvider:
     if settings.tts_provider == "azure":
         return _azure(settings)
 
+    if settings.tts_provider == "uplift":
+        # Not wrapped in failover to Azure. The whole reason to select Uplift is
+        # that a Pakistani ear preferred it; silently substituting the voice
+        # that was rejected would hide the very thing being evaluated.
+        from agent.providers.tts_uplift import UpliftTTS
+
+        return UpliftTTS(
+            api_key=settings.uplift_api_key.get_secret_value(),
+            default_voice=settings.uplift_voice,
+        )
+
     if settings.tts_provider == "inworld":
         from agent.providers.tts_failover import FailoverTTS
         from agent.providers.tts_inworld import InworldTTS

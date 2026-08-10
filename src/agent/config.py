@@ -48,7 +48,7 @@ class Settings(BaseSettings):
 
     # ---- provider selection (runtime-switchable, see DECISION 5) --------
     stt_provider: Literal["deepgram", "fake"] = "deepgram"
-    tts_provider: Literal["azure", "inworld", "fake"] = "azure"
+    tts_provider: Literal["azure", "inworld", "uplift", "fake"] = "azure"
     # "claude" talks to the Anthropic API directly; "openrouter" proxies through
     # OpenRouter, which costs an extra network hop against the 300ms TTFT budget.
     # Measure both in TASK-12 before committing to one for production.
@@ -96,6 +96,8 @@ class Settings(BaseSettings):
     voice_mode: Literal["realtime", "pipeline"] = "realtime"
     realtime_model: str = "gpt-realtime"
     realtime_voice: str = "cedar"
+    # See docs.upliftai.org/orator_voices for the full 82.
+    uplift_voice: str = "broadband-support"
     tts_voice_english: str = "en-US-AriaNeural"
 
     # ---- latency budget in ms (asserted by tests/latency/) -------------------
@@ -129,6 +131,20 @@ class Settings(BaseSettings):
     retrieval_top_k: int = Field(default=4, ge=1, le=20)
     answer_cache_ttl_s: int = Field(default=3600, ge=0)
     answer_cache_threshold: float = Field(default=0.93, ge=0.0, le=1.0)
+
+    @property
+    def default_voice(self) -> str:
+        """The starting voice for a call, in the selected vendor's namespace.
+
+        Voice ids are not portable: "ur-PK-UzmaNeural" means nothing to Uplift
+        and "broadband-support" means nothing to Azure. Defaulting to the Azure
+        name regardless of provider made every Uplift synthesis fail with
+        "Invalid voiceId" — and because the failure was inside TTS, the caller
+        heard silence rather than an error.
+        """
+        if self.tts_provider == "uplift":
+            return self.uplift_voice
+        return self.tts_voice_urdu
 
     @property
     def realtime_api_key(self) -> str:
