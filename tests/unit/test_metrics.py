@@ -9,7 +9,7 @@ import pytest
 
 from agent.telemetry.alerts import evaluate_alerts
 from agent.telemetry.cost import Rates, call_cost_pkr, turn_cost_pkr
-from agent.telemetry.metrics import TurnMetrics, percentile
+from agent.telemetry.metrics import CallTimeline, TurnMetrics, percentile
 
 
 def _turn(**kw: object) -> TurnMetrics:
@@ -17,6 +17,68 @@ def _turn(**kw: object) -> TurnMetrics:
     for key, value in kw.items():
         setattr(m, key, value)
     return m
+
+
+# ── the whole call's setup timeline ──────────────────────────────────────────
+#
+# TurnMetrics answers "how fast was this reply". Nothing answered "where did
+# the five seconds before the caller heard anything at all go" — that gap is
+# LiveKit dispatch, participant join, database warm-up and track subscription
+# stacked, not one vendor's TTFB. CallTimeline is a flat list of checkpoints
+# rather than named fields because the pipeline and realtime paths pass
+# through different stages entirely.
+
+
+def test_marks_accumulate_in_order() -> None:
+    timeline = CallTimeline(call_id="c1", room="demo-1")
+    timeline.mark("participant_joined")
+    timeline.mark("agent_built")
+
+    labels = [label for label, _ in timeline.marks]
+    assert labels == ["participant_joined", "agent_built"]
+
+
+def test_mark_returns_the_elapsed_ms_for_immediate_use() -> None:
+    timeline = CallTimeline(call_id="c1", room="demo-1")
+    elapsed = timeline.mark("agent_built")
+    assert elapsed >= 0.0
+
+
+def test_later_marks_have_larger_elapsed_time() -> None:
+    timeline = CallTimeline(call_id="c1", room="demo-1")
+    timeline.mark("first")
+    time.sleep(0.01)
+    timeline.mark("second")
+
+    (_, first_ms), (_, second_ms) = timeline.marks
+    assert second_ms > first_ms
+
+
+def test_as_log_carries_call_id_and_room() -> None:
+    timeline = CallTimeline(call_id="call_abc", room="demo-xyz")
+    timeline.mark("agent_built")
+
+    line = timeline.as_log()
+    assert line["event"] == "call_timeline"
+    assert line["call_id"] == "call_abc"
+    assert line["room"] == "demo-xyz"
+    assert [m["label"] for m in line["marks"]] == ["agent_built"]
+
+
+def test_total_ms_is_the_last_mark_not_time_of_logging() -> None:
+    """The call may still be tearing down when this is built; the headline
+    number is "time to the last thing that happened", not "time to now"."""
+    timeline = CallTimeline(call_id="c1", room="demo-1")
+    timeline.mark("a")
+    elapsed = timeline.mark("b")
+
+    assert timeline.as_log()["total_ms"] == pytest.approx(elapsed, abs=0.05)
+
+
+def test_an_empty_timeline_reports_zero_rather_than_crashing() -> None:
+    timeline = CallTimeline(call_id="c1", room="demo-1")
+    assert timeline.as_log()["total_ms"] == 0.0
+    assert timeline.as_log()["marks"] == []
 
 
 # ── timing ──────────────────────────────────────────────────────────────────

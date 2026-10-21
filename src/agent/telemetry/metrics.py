@@ -17,7 +17,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-__all__ = ["TurnMetrics", "percentile"]
+__all__ = ["CallTimeline", "TurnMetrics", "percentile"]
 
 
 @dataclass
@@ -152,6 +152,55 @@ class TurnMetrics:
 
 def _round(value: float | None) -> float | None:
     return None if value is None else round(value, 1)
+
+
+@dataclass
+class CallTimeline:
+    """Every checkpoint of one call, from job dispatch to hangup, in one place.
+
+    ``TurnMetrics`` answers "how fast was this reply" for the pipeline path.
+    Nothing answered "where did the five seconds before the caller heard
+    anything at all go" — and that gap is not one vendor's fault, it is
+    LiveKit dispatch, participant join, database warm-up, track subscription,
+    and the TTS or realtime socket, stacked. A rigid dataclass with one field
+    per stage would need a different set of optional fields for the pipeline
+    path and the realtime path; a flat list of ``(label, elapsed_ms)`` needs
+    none, and ``mark()`` is the entire contract every caller has to know.
+
+    ``time.perf_counter`` throughout, for the same reason as ``TurnMetrics``:
+    wall clock can step backwards on an NTP correction, and a negative
+    duration in a latency report is worse than a missing one.
+    """
+
+    call_id: str
+    room: str
+    _t0: float = field(default_factory=time.perf_counter, repr=False)
+    marks: list[tuple[str, float]] = field(default_factory=list)
+
+    def mark(self, label: str) -> float:
+        """Record a checkpoint now and return its elapsed ms, for a log line
+        that wants the number immediately rather than reading it back out of
+        ``marks``.
+        """
+        elapsed = (time.perf_counter() - self._t0) * 1000
+        self.marks.append((label, elapsed))
+        return elapsed
+
+    def as_log(self) -> dict[str, object]:
+        """One structured line for the whole call.
+
+        ``total_ms`` is the last mark, not ``time.perf_counter()`` again —
+        the call may still be tearing down when this is built, and the
+        headline number should be "time to the last thing that happened",
+        not "time to whenever logging got around to it".
+        """
+        return {
+            "event": "call_timeline",
+            "call_id": self.call_id,
+            "room": self.room,
+            "total_ms": round(self.marks[-1][1], 1) if self.marks else 0.0,
+            "marks": [{"at_ms": round(ms, 1), "label": label} for label, ms in self.marks],
+        }
 
 
 def percentile(values: list[float], p: float) -> float:

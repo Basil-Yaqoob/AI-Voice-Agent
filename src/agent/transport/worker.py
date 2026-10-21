@@ -37,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
+from uuid import uuid4
 
 from livekit import rtc
 from livekit.agents import AutoSubscribe, JobContext
@@ -44,6 +45,7 @@ from livekit.agents import AutoSubscribe, JobContext
 from agent.config import Settings, get_settings
 from agent.main import SELECTABLE_VOICES, VoiceAgent, open_database
 from agent.telemetry.logging import get_logger
+from agent.telemetry.metrics import CallTimeline
 from agent.transport import realtime as realtime_module
 from agent.transport.sink import LiveKitSink
 
@@ -66,12 +68,20 @@ async def entrypoint(ctx: JobContext) -> None:
     settings = get_settings()
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
+    # One id, shared with the VoiceAgent and every TurnMetrics line it
+    # produces, so a slow call's setup timeline and its per-turn timings can
+    # be pulled back out of the log together afterwards.
+    call_id = f"call_{uuid4().hex[:8]}"
+    timeline = CallTimeline(call_id=call_id, room=ctx.room.name)
+
     participant = await ctx.wait_for_participant()
+    timeline.mark("participant_joined")
     caller_phone = VoiceAgent.caller_phone_from(participant)
 
     log.info(
         "call_started",
         room=ctx.room.name,
+        call_id=call_id,
         participant=participant.identity,
         caller_known=caller_phone is not None,
     )
@@ -79,11 +89,13 @@ async def entrypoint(ctx: JobContext) -> None:
     database = open_database()
     if database is not None:
         await database.warm()
+        timeline.mark("database_warmed")
 
     realtime = settings.voice_mode == "realtime"
     rate = realtime_module.SAMPLE_RATE if realtime else _tts_sample_rate(settings)
     sink = LiveKitSink(sample_rate=rate)
     await sink.publish(ctx.room)
+    timeline.mark("sink_published")
 
     agent = VoiceAgent(
         settings,
@@ -91,7 +103,10 @@ async def entrypoint(ctx: JobContext) -> None:
         sink,
         caller_phone=caller_phone,
         database=database,
+        call_id=call_id,
+        timeline=timeline,
     )
+    timeline.mark("agent_built")
 
     # The pipeline can switch voice mid-call; realtime cannot, so both take it
     # from the token and the page behaves the same way in either mode.
@@ -101,20 +116,24 @@ async def entrypoint(ctx: JobContext) -> None:
 
     try:
         if realtime:
-            await _run_realtime(agent, settings, ctx.room, participant, sink)
+            await _run_realtime(agent, settings, ctx.room, participant, sink, timeline)
         else:
-            await _run_call(agent, settings, ctx.room, participant)
+            await _run_call(agent, settings, ctx.room, participant, timeline)
     except asyncio.CancelledError:
         raise
     except Exception:
-        log.exception("call_failed", room=ctx.room.name)
+        log.exception("call_failed", room=ctx.room.name, call_id=call_id)
         raise
     finally:
         agent.end()
         await sink.aclose()
         if database is not None:
             database.close()
-        log.info("call_ended", room=ctx.room.name)
+        timeline.mark("call_ended")
+        # The whole call's story in one line: what a 5-second connect was
+        # actually spent on, without bisecting a terminal's scrollback.
+        log.info(**timeline.as_log())
+        log.info("call_ended", room=ctx.room.name, call_id=call_id)
 
 
 async def _run_realtime(
@@ -123,6 +142,7 @@ async def _run_realtime(
     room: rtc.Room,
     participant: rtc.Participant,
     sink: LiveKitSink,
+    timeline: CallTimeline,
 ) -> None:
     """Speech to speech on one socket. No STT, no TTS, no turn runner.
 
@@ -135,6 +155,7 @@ async def _run_realtime(
     if track is None:
         log.warning("caller_published_no_audio", participant=participant.identity)
         return
+    timeline.mark("audio_track_ready")
 
     audio = rtc.AudioStream(
         track,
@@ -163,6 +184,8 @@ async def _run_realtime(
         sink=sink,
         publish=agent.publish,
         ringback=agent.ringback,
+        timeline=timeline,
+        call_id=agent.call_id,
     )
 
     # Held so the event loop cannot garbage-collect a switch mid-flight.
@@ -225,6 +248,7 @@ async def _run_call(
     settings: Settings,
     room: rtc.Room,
     participant: rtc.Participant,
+    timeline: CallTimeline,
 ) -> None:
     """Pump caller audio through STT and drive the agent from the transcripts."""
     stt = agent.stt
@@ -239,6 +263,7 @@ async def _run_call(
     if track is None:
         log.warning("caller_published_no_audio", participant=participant.identity)
         return
+    timeline.mark("audio_track_ready")
 
     audio = rtc.AudioStream(
         track,

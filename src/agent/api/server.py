@@ -19,9 +19,9 @@ from pydantic import BaseModel
 
 from agent.api.identity import identity_for
 from agent.config import Settings, get_settings
-from agent.telemetry.logging import get_logger
+from agent.telemetry.logging import configure_logging, get_logger
 
-__all__ = ["TokenRequest", "TokenResponse", "create_app"]
+__all__ = ["ClientTimingRequest", "TokenRequest", "TokenResponse", "create_app"]
 
 log = get_logger(__name__)
 
@@ -30,6 +30,19 @@ STATIC_DIR = Path(__file__).parent / "static"
 # Short enough that a token copied off a shared screen expires quickly, long
 # enough for an unhurried demo.
 TOKEN_TTL = timedelta(minutes=30)
+
+
+class ClientTimingRequest(BaseModel):
+    """The browser's own half of the call timeline.
+
+    The worker's clock only starts once LiveKit dispatches the job to it,
+    which is already several steps after the caller pressed Connect — token
+    fetch, room negotiation, LiveKit finding a worker. Nothing server-side can
+    see that gap; only the browser was there for it.
+    """
+
+    room: str
+    marks: list[dict[str, Any]]
 
 
 class TokenRequest(BaseModel):
@@ -62,6 +75,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def _settings() -> Settings:
         return settings or get_settings()
+
+    # The worker calls this too (main.bootstrap). Both processes append to the
+    # same file, which is the point: a call's setup timeline (worker) and its
+    # browser timeline (this process) land in one place instead of two
+    # terminal windows that scroll independently.
+    _s = _settings()
+    configure_logging(_s.log_level, _s.log_file)
 
     @app.post("/api/token", response_model=TokenResponse)
     async def mint_token(request: TokenRequest | None = None) -> TokenResponse:
@@ -120,6 +140,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "default_voice": s.realtime_voice if s.voice_mode == "realtime" else s.default_voice,
             "voices": [{"id": v.id, "label": v.label, "vendor": v.vendor} for v in voices],
         }
+
+    @app.post("/api/call-timing")
+    async def call_timing(request: ClientTimingRequest) -> dict[str, str]:
+        """Where the browser's half of the call timeline lands.
+
+        Best-effort by design — sent once, from the disconnect handler, after
+        the thing being measured is already over. There is nothing to retry
+        and nothing a dropped request should do to the call.
+        """
+        log.info("client_timeline", room=request.room, marks=request.marks)
+        return {"status": "logged"}
 
     @app.get("/health")
     async def health() -> dict[str, object]:

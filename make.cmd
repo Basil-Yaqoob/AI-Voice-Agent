@@ -27,6 +27,7 @@ if /i "%TARGET%"=="vendor"           goto vendor
 if /i "%TARGET%"=="demo"             goto demo
 if /i "%TARGET%"=="serve"            goto serve
 if /i "%TARGET%"=="stop"             goto stop
+if /i "%TARGET%"=="call-report"      goto call-report
 goto unknown
 
 :help
@@ -49,6 +50,7 @@ echo vendor           re-download the LiveKit browser client
 echo demo             run the agent worker
 echo serve            run the control plane on :8000 (the demo page)
 echo stop             stop the worker and the control plane
+echo call-report      print the latency breakdown of the last call (or: make call-report demo-xxxx)
 goto :eof
 
 :dev
@@ -134,6 +136,10 @@ goto :eof
 REM No error if nothing is running - "already stopped" is the desired state.
 powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name like '%%python%%'\" | Where-Object { $_.CommandLine -match 'agent.main dev|agent.api.server' } | ForEach-Object { Write-Output ('stopping ' + $_.ProcessId); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
 echo worker and control plane stopped
+goto :eof
+
+:call-report
+uv run python scripts/call_report.py %2 || exit /b 1
 goto :eof
 
 :unknown

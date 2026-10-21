@@ -3,11 +3,28 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 import structlog
 
 from agent.telemetry.logging import REDACTED, configure_logging, get_logger
+
+
+@pytest.fixture(autouse=True)
+def _restore_safe_global_logging() -> Iterator[None]:
+    """``configure_logging`` mutates process-global structlog state, and a
+    module's ``log = get_logger(__name__)`` does not materialise its actual
+    logger until its first ``.info()`` call — which can happen in a test file
+    that runs long after this one. Leave a file- or capsys-backed config
+    behind here and an unrelated test elsewhere crashes with "I/O operation on
+    closed file" the first time it logs anything, for a reason nowhere near
+    where the fault actually is. Every test in this file gets real stdout back
+    on the way out, regardless of what it configured.
+    """
+    yield
+    configure_logging("INFO")
 
 
 @pytest.fixture
@@ -81,3 +98,70 @@ def test_configure_logging_is_idempotent() -> None:
     configure_logging("INFO")
     configure_logging("INFO")
     get_logger("t").info("still works")
+
+
+# ── logging to a file, as well as the console ────────────────────────────────
+#
+# The worker and the control plane run in separate terminals, and a terminal's
+# scrollback is not where "what happened on the call three demos ago" gets
+# answered. These exercise the real file handle, not the captured-output
+# fixture above — the whole point is bytes landing on disk.
+
+
+def test_a_configured_file_receives_json_lines(tmp_path: Path) -> None:
+    path = tmp_path / "calls.jsonl"
+    configure_logging("INFO", log_file=path)
+    get_logger("t").info("call_timeline", call_id="call_1", room="demo-1")
+
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    entry = json.loads(lines[0])
+    assert entry["event"] == "call_timeline"
+    assert entry["call_id"] == "call_1"
+
+
+def test_missing_parent_directories_are_created(tmp_path: Path) -> None:
+    path = tmp_path / "nested" / "does" / "not" / "exist" / "calls.jsonl"
+    configure_logging("INFO", log_file=path)
+    get_logger("t").info("ping")
+
+    assert path.exists()
+
+
+def test_the_console_still_gets_output_when_a_file_is_also_configured(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The file is additive. Live debugging in the terminal must not regress."""
+    path = tmp_path / "calls.jsonl"
+    configure_logging("INFO", log_file=path)
+    get_logger("t").info("ping")
+
+    out = capsys.readouterr().out
+    assert '"ping"' in out
+
+
+def test_repeated_calls_append_rather_than_truncate(tmp_path: Path) -> None:
+    """A demo runs `make demo` more than once; the second run must not erase
+    the first call's timeline."""
+    path = tmp_path / "calls.jsonl"
+    configure_logging("INFO", log_file=path)
+    get_logger("t").info("first_call")
+
+    configure_logging("INFO", log_file=path)
+    get_logger("t").info("second_call")
+
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    events = [json.loads(line)["event"] for line in lines]
+    assert events == ["first_call", "second_call"]
+
+
+def test_an_empty_log_file_setting_disables_the_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Settings.log_file defaults to a real path; "" is how a test — or an
+    operator — turns the file off without touching the console output."""
+    configure_logging("INFO", log_file="")
+    get_logger("t").info("console_only")
+
+    assert capsys.readouterr().out  # still logs somewhere
+    assert not (tmp_path / "calls.jsonl").exists()

@@ -89,6 +89,8 @@ def _session(
     sink: _Sink,
     published: list[dict[str, Any]],
     ringback: Any = None,
+    timeline: Any = None,
+    call_id: str = "",
 ) -> RealtimeSession:
     async def publish(payload: dict[str, Any]) -> None:
         published.append(payload)
@@ -102,6 +104,8 @@ def _session(
         sink=sink,
         publish=publish,
         ringback=ringback,
+        timeline=timeline,
+        call_id=call_id,
     )
     session._ws = ws
     return session
@@ -472,3 +476,187 @@ async def test_the_worker_tells_the_page_there_is_no_agent() -> None:
     source = Path("src/agent/transport/worker.py").read_text(encoding="utf-8")
     assert "RealtimeUnavailable" in source
     assert '"type": "error"' in source, "the failure has to reach the browser"
+
+
+# ── per-turn latency on the realtime path ─────────────────────────────────────
+#
+# This path had no equivalent of TurnMetrics at all — the pipeline logged a
+# first_audio_ms for every reply and this one logged nothing, which was
+# invisible right up until "500ms in the docs, 5-8s on the call" needed an
+# answer neither the docs nor the running agent could give. speech_stopped is
+# the anchor, not the transcript: OpenAI's own transcription can complete
+# after audio has already started, and anchoring there would flatter the
+# number exactly the way it would on the pipeline path.
+
+
+class _Logged:
+    """Stands in for the module logger and records what would have shipped."""
+
+    def __init__(self) -> None:
+        self.lines: list[dict[str, Any]] = []
+
+    def info(self, **kw: Any) -> None:
+        self.lines.append(kw)
+
+    def warning(self, **kw: Any) -> None:
+        pass
+
+    def exception(self, **kw: Any) -> None:
+        pass
+
+
+def _patched_log(monkeypatch: pytest.MonkeyPatch) -> _Logged:
+    from agent.transport import realtime as module
+
+    captured = _Logged()
+    monkeypatch.setattr(module, "log", captured)
+    return captured
+
+
+async def test_a_turn_is_logged_from_speech_stopped_to_first_audio(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _patched_log(monkeypatch)
+    ws = _WS(
+        [
+            {"type": "input_audio_buffer.speech_stopped"},
+            {"type": "response.output_audio.delta", "delta": _audio(b"\x01\x02")},
+            {"type": "response.output_audio_transcript.done", "transcript": "hello"},
+        ]
+    )
+    session = _session(ws, _Sink(), [], call_id="call_xyz")
+
+    await session._receive()
+
+    turns = [line for line in captured.lines if line.get("event") == "turn_complete"]
+    assert len(turns) == 1
+    assert turns[0]["call_id"] == "call_xyz"
+    assert turns[0]["turn_id"] == "turn_01"
+    assert turns[0]["first_audio_ms"] is not None
+    assert turns[0]["tts_provider"] == "realtime"
+
+
+async def test_the_greeting_produces_no_turn_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No speech_stopped precedes it — it is not a reply to anything."""
+    captured = _patched_log(monkeypatch)
+    ws = _WS(
+        [
+            {"type": "response.output_audio.delta", "delta": _audio(b"\x01")},
+            {"type": "response.output_audio_transcript.done", "transcript": "hi"},
+        ]
+    )
+    session = _session(ws, _Sink(), [])
+
+    await session._receive()
+
+    assert not [line for line in captured.lines if line.get("event") == "turn_complete"]
+
+
+async def test_two_turns_get_two_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _patched_log(monkeypatch)
+    ws = _WS(
+        [
+            {"type": "input_audio_buffer.speech_stopped"},
+            {"type": "response.output_audio.delta", "delta": _audio(b"\x01")},
+            {"type": "response.output_audio_transcript.done", "transcript": "one"},
+            {"type": "input_audio_buffer.speech_stopped"},
+            {"type": "response.output_audio.delta", "delta": _audio(b"\x02")},
+            {"type": "response.output_audio_transcript.done", "transcript": "two"},
+        ]
+    )
+    session = _session(ws, _Sink(), [])
+
+    await session._receive()
+
+    turns = [line for line in captured.lines if line.get("event") == "turn_complete"]
+    assert [t["turn_id"] for t in turns] == ["turn_01", "turn_02"]
+
+
+async def test_a_turn_interrupted_before_finishing_is_still_logged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pipeline records what was SPOKEN after a barge-in, not what was
+    intended — this is the same discipline applied to the realtime path."""
+    captured = _patched_log(monkeypatch)
+    ws = _WS(
+        [
+            {"type": "input_audio_buffer.speech_stopped"},
+            {"type": "response.output_audio.delta", "delta": _audio(b"\x01")},
+            {"type": "input_audio_buffer.speech_started"},  # cut off mid-reply
+        ]
+    )
+    session = _session(ws, _Sink(), [])
+
+    await session._receive()
+
+    turns = [line for line in captured.lines if line.get("event") == "turn_complete"]
+    assert len(turns) == 1
+    assert turns[0]["interrupted"] is True
+
+
+async def test_a_plain_barge_in_before_any_reply_logs_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interrupting the greeting, or talking before the agent has replied at
+    all, must not manufacture a turn that never happened."""
+    captured = _patched_log(monkeypatch)
+    ws = _WS([{"type": "input_audio_buffer.speech_started"}])
+    session = _session(ws, _Sink(), [])
+
+    await session._receive()
+
+    assert not [line for line in captured.lines if line.get("event") == "turn_complete"]
+
+
+async def test_transcription_completing_does_not_double_count_first_audio(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Whisper's own transcript can arrive after audio has already started;
+    it must not overwrite the real first-audio timestamp."""
+    _patched_log(monkeypatch)
+    ws = _WS(
+        [
+            {"type": "input_audio_buffer.speech_stopped"},
+            {"type": "response.output_audio.delta", "delta": _audio(b"\x01")},
+            {
+                "type": "conversation.item.input_audio_transcription.completed",
+                "transcript": "پیناڈول دستیاب ہے",
+            },
+        ]
+    )
+    session = _session(ws, _Sink(), [])
+
+    await session._receive()
+
+    assert session._turn_metrics is not None
+    assert session._turn_metrics.first_audio_at is not None
+    assert session._turn_metrics.transcript_final_at is not None
+
+
+# ── the call's setup timeline ────────────────────────────────────────────────
+
+
+async def test_socket_open_and_configure_are_marked() -> None:
+    class _Timeline:
+        def __init__(self) -> None:
+            self.labels: list[str] = []
+
+        def mark(self, label: str) -> float:
+            self.labels.append(label)
+            return 0.0
+
+    timeline = _Timeline()
+    session = _session(_WS([]), _Sink(), [], timeline=timeline)
+    session._ws = _WS([])
+    await session._configure()
+    session._mark("realtime_socket_open")
+
+    assert "realtime_socket_open" in timeline.labels
+
+
+async def test_a_session_with_no_timeline_does_not_crash() -> None:
+    """timeline is optional — nothing here requires the worker's plumbing."""
+    session = _session(_WS([]), _Sink(), [])
+    session._mark("anything")  # must not raise

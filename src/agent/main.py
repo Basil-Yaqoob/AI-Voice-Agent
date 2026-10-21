@@ -37,7 +37,7 @@ from agent.pipeline.turn import TurnRunner
 from agent.providers.registry import build_llm, build_stt, build_tts
 from agent.providers.voices import ALL_VOICE_IDS
 from agent.telemetry.logging import configure_logging, get_logger
-from agent.telemetry.metrics import TurnMetrics
+from agent.telemetry.metrics import CallTimeline, TurnMetrics
 from agent.tools.demo_backend import build_demo_registry
 from agent.tools.dvago_backend import DvagoBackend, build_dvago_registry
 from agent.transport.ringback import Ringback
@@ -102,10 +102,17 @@ class VoiceAgent:
         *,
         caller_phone: str | None = None,
         database: Database | None = None,
+        call_id: str | None = None,
+        timeline: CallTimeline | None = None,
     ) -> None:
         self._settings = settings
         self._room = room
         self._sink = sink
+        # A shared id, not a fresh one: the worker's CallTimeline and every
+        # TurnMetrics line this call produces need to carry the same value or
+        # a call's setup timeline and its per-turn timings cannot be joined
+        # back together when reading the log afterwards.
+        self._timeline = timeline
 
         self._stt = build_stt(settings)
         self._tts = build_tts(settings)
@@ -130,7 +137,7 @@ class VoiceAgent:
         self._ringback = Ringback(sink)
 
         self._history: list[Message] = []
-        self._call_id = f"call_{uuid4().hex[:8]}"
+        self._call_id = call_id or f"call_{uuid4().hex[:8]}"
         self._turn_index = 0
         self._voice = settings.default_voice
 
@@ -178,6 +185,7 @@ class VoiceAgent:
         Failure is not fatal: a caller who hears no greeting can still be
         helped, so a broken TTS at this moment must not end the call.
         """
+        self._mark("greeting_start")
         self._ringback.start()
         try:
             speech = self._tts.synthesize(GREETING_URDU, voice=self._voice)
@@ -189,6 +197,7 @@ class VoiceAgent:
             first, _ = await asyncio.gather(
                 _first_chunk(speech), asyncio.sleep(GREETING_SETTLE_S)
             )
+            self._mark("greeting_tts_first_byte")
         except Exception as exc:
             log.warning("greeting_failed", detail=str(exc)[:200])
             return
@@ -207,6 +216,7 @@ class VoiceAgent:
         except Exception as exc:
             log.warning("greeting_failed", detail=str(exc)[:200])
             return
+        self._mark("greeting_played")
         self._history.append(Message(role="assistant", content=GREETING_URDU))
         await self._publish(
             {"type": "transcript", "role": "agent", "text": GREETING_URDU, "final": True}
@@ -307,6 +317,16 @@ class VoiceAgent:
             )
             await self._publish({"type": "metrics", **metrics.as_log()})
             log.info(**metrics.as_log())
+
+    def _mark(self, label: str) -> None:
+        """Record a call-setup checkpoint, if anyone is listening for one.
+
+        ``timeline`` is ``None`` in every unit test that builds a ``VoiceAgent``
+        directly, and in the fallback demo path — this must be a no-op there
+        rather than a required wire-up.
+        """
+        if self._timeline is not None:
+            self._timeline.mark(label)
 
     def _return_to_listening(self) -> None:
         """Ready for the next turn, from wherever this one ended.
@@ -422,6 +442,16 @@ class VoiceAgent:
         return self._stt
 
     @property
+    def call_id(self) -> str:
+        """Shared with the worker's ``CallTimeline`` so the two logs join.
+
+        Exposed because the realtime path builds its own per-turn
+        ``TurnMetrics`` in ``transport/realtime.py`` and needs the same id the
+        rest of this call's log lines carry.
+        """
+        return self._call_id
+
+    @property
     def ringback(self) -> Ringback:
         """The tone that covers the wait before the first word.
 
@@ -473,7 +503,7 @@ def open_database(path: Path = DVAGO_DB) -> Database | None:
 def bootstrap() -> Settings:
     """Load config, fail fast on missing credentials, install logging."""
     settings = get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, settings.log_file)
     validate_credentials(settings)
 
     corpus = load_corpus_dir(CORPUS_DIR) or FALLBACK_CORPUS

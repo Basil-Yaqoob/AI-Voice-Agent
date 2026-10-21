@@ -60,3 +60,10 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "LLM_EFFORT",
     ):
         monkeypatch.delenv(name, raising=False)
+
+    # Explicitly off, not just stripped: unlike the vars above, LOG_FILE
+    # defaults to a real path ("logs/calls.jsonl") rather than an empty
+    # string, so deleting the env var still falls through to that default (or
+    # to a developer's real .env) and every test run of create_app()/
+    # bootstrap() would otherwise write into the actual repo.
+    monkeypatch.setenv("LOG_FILE", "")

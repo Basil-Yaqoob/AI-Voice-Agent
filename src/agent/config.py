@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # ---- environment ---------------------------------------------------
     env: Literal["local", "staging", "production"] = "local"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    # Additive to the console, not a replacement for it — see telemetry/logging.py.
+    # Empty disables the file; the worker and the control plane both open this
+    # path, so a call's setup timeline and its per-turn timeline land together.
+    log_file: str = "logs/calls.jsonl"
 
     # ---- provider selection (runtime-switchable, see DECISION 5) --------
     stt_provider: Literal["deepgram", "fake"] = "deepgram"

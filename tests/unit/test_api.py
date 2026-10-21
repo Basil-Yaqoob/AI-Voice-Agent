@@ -28,6 +28,9 @@ def _settings(**kw: object) -> Settings:
         "deepgram_api_key": SecretStr("dg"),
         "azure_speech_key": SecretStr("az"),
         "openrouter_api_key": SecretStr("or"),
+        # Tests must not write into the real logs/ directory as a side effect
+        # of building an app — see test_logging.py for the file-tee itself.
+        "log_file": "",
     }
     base.update(kw)
     return Settings(**base)  # type: ignore[arg-type]
@@ -253,3 +256,39 @@ def test_the_page_does_not_try_to_switch_voice_mid_call() -> None:
     assert "set_voice" not in source.split("/* No mid-call handler.")[0], (
         "the voice belongs in the token, not the data channel"
     )
+
+
+# ── the browser's half of the call timeline ──────────────────────────────────
+#
+# The worker's own timeline only starts once LiveKit dispatches the job to
+# it — already several steps after Connect was pressed. This is where the
+# only visibility into that earlier gap lands.
+
+
+def test_call_timing_accepts_the_browsers_marks(client: TestClient) -> None:
+    response = client.post(
+        "/api/call-timing",
+        json={
+            "room": "demo-abc123",
+            "marks": [
+                {"label": "connect_clicked", "at_ms": 0},
+                {"label": "token_received", "at_ms": 180},
+            ],
+        },
+    )
+    assert response.status_code == 200
+
+
+def test_call_timing_rejects_a_malformed_body(client: TestClient) -> None:
+    """A page bug here must be visible, not a silent 500 the caller never sees."""
+    response = client.post("/api/call-timing", json={"room": "demo-abc123"})
+    assert response.status_code == 422
+
+
+def test_call_timing_never_needs_a_secret(client: TestClient) -> None:
+    """Posted after the call is already over; nothing here should be able to
+    require the credentials a live call needed."""
+    response = client.post(
+        "/api/call-timing", json={"room": "demo-abc123", "marks": []}
+    )
+    assert response.status_code == 200

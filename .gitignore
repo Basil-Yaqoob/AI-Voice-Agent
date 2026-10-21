@@ -18,3 +18,7 @@ eval/out/
 *.db-shm
 *.db.tmp
 voice-samples/
+
+# Per-call latency logs (see telemetry/logging.py). Local diagnostic output,
+# not something to commit — and it accumulates every call's timeline.
+logs/

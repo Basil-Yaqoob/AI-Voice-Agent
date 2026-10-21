@@ -2,7 +2,7 @@
 # Windows has no `make` by default — make.cmd mirrors these targets.
 # Keep the two in sync; tests/unit/test_task_runner.py enforces it.
 
-.PHONY: help dev down vendor test test-unit test-integration test-latency test-contract lint fmt eval ingest prerender dataset db data demo serve stop
+.PHONY: help dev down vendor test test-unit test-integration test-latency test-contract lint fmt eval ingest prerender dataset db data demo serve stop call-report
 
 help:
 	@echo "dev              start Postgres + Redis"
@@ -24,6 +24,7 @@ help:
 	@echo "demo             run the agent worker"
 	@echo "serve            run the control plane on :8000 (the demo page)"
 	@echo "stop             stop the worker and the control plane"
+	@echo "call-report      print the latency breakdown of the last call (or: make call-report ROOM=demo-xxxx)"
 
 dev:
 	docker compose up -d
@@ -91,3 +92,6 @@ serve:
 stop:
 	-pkill -f "agent.main dev"
 	-pkill -f "agent.api.server"
+
+call-report:
+	uv run python scripts/call_report.py $(ROOM)

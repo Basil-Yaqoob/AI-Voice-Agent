@@ -23,6 +23,40 @@ const els = {
 const BUDGET_MS = 800;
 let room = null;
 
+/* Timing the browser's own half of the call.
+ *
+ * The worker's clock only starts once LiveKit dispatches the job to it,
+ * which is already several steps after the caller pressed Connect — token
+ * fetch, room negotiation, LiveKit finding a worker. None of that is visible
+ * server-side. This records it here and posts it to the control plane at
+ * hang-up, tagged with the room name, so it lands in the same log the
+ * worker's own timeline goes to instead of only ever living in this tab's
+ * console. */
+let clientMarks = [];
+let clientT0 = 0;
+let roomName = null;
+
+function markClient(label) {
+  if (!clientT0) return;
+  clientMarks.push({ label, at_ms: Math.round(performance.now() - clientT0) });
+}
+
+async function sendClientTiming() {
+  if (!roomName || clientMarks.length === 0) return;
+  try {
+    // keepalive: the tab may be mid-navigation on hang-up; this lets the
+    // request outlive the handler that fired it rather than being cancelled.
+    await fetch('/api/call-timing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      keepalive: true,
+      body: JSON.stringify({ room: roomName, marks: clientMarks }),
+    });
+  } catch (e) {
+    // Best-effort only. The call is already over; nothing to retry for.
+  }
+}
+
 function setState(text, kind) {
   els.state.textContent = text;
   els.dot.className = 'dot' + (kind ? ' ' + kind : '');
@@ -74,7 +108,10 @@ function onData(payload) {
   } catch (e) {
     return; // never let a malformed frame break the call
   }
-  if (msg.type === 'transcript' && msg.final) appendMessage(msg.role, msg.text);
+  if (msg.type === 'transcript' && msg.final) {
+    appendMessage(msg.role, msg.text);
+    markClient((msg.role === 'agent' ? 'agent' : 'caller') + '_transcript');
+  }
   if (msg.type === 'metrics' && msg.first_audio_ms) showMetrics(msg);
   if (msg.type === 'state') setState(msg.state, 'live');
   // A call can be connected and still have nothing behind it — the socket to
@@ -91,6 +128,13 @@ async function connect() {
   els.connect.disabled = true;
   setState('connecting');
 
+  // Fresh timeline per call — a reconnect after a hang-up must not carry the
+  // previous call's marks into this one's report.
+  clientMarks = [];
+  clientT0 = performance.now();
+  roomName = null;
+  markClient('connect_clicked');
+
   try {
     // The caller number goes to the server, which signs it into the token
     // identity. Sending it from the page on every request instead would let
@@ -106,7 +150,9 @@ async function connect() {
       }),
     });
     if (!res.ok) throw new Error('token endpoint returned ' + res.status);
-    const { token, url } = await res.json();
+    const { token, url, room: mintedRoom } = await res.json();
+    roomName = mintedRoom;
+    markClient('token_received');
 
     els.caller.disabled = true;
     // Both are properties of the call, fixed the moment it starts. Leaving
@@ -121,6 +167,11 @@ async function connect() {
     // TTS rather than a missing line of browser plumbing.
     room.on(LivekitClient.RoomEvent.TrackSubscribed, (track) => {
       if (track.kind !== 'audio') return;
+      // The earliest moment this tab could possibly play the agent — not the
+      // same instant as the greeting's first syllable (there is still an
+      // audio element and the browser's own buffering between this and
+      // actually audible sound), but the closest thing to it visible here.
+      markClient('agent_track_subscribed');
       const el = track.attach();
       el.autoplay = true;
       el.setAttribute('data-agent-audio', '');
@@ -147,6 +198,8 @@ async function connect() {
     });
 
     room.on(LivekitClient.RoomEvent.Disconnected, () => {
+      markClient('disconnected');
+      sendClientTiming();
       document.querySelectorAll('[data-agent-audio]').forEach((el) => el.remove());
       setState('disconnected');
       els.connect.disabled = false;
@@ -158,6 +211,7 @@ async function connect() {
     });
 
     await room.connect(url, token);
+    markClient('room_connected');
 
     // Echo cancellation is not optional. Without it the agent hears itself
     // through laptop speakers and interrupts its own sentence, which looks
@@ -167,12 +221,15 @@ async function connect() {
       noiseSuppression: true,
       autoGainControl: true,
     });
+    markClient('mic_published');
 
     setState('listening', 'live');
     els.connect.disabled = false;
     els.connect.textContent = 'Hang up';
     els.connect.classList.add('stop');
   } catch (err) {
+    markClient('connect_failed');
+    sendClientTiming();
     setState('failed', 'err');
     els.connect.disabled = false;
     showError(
@@ -184,6 +241,7 @@ async function connect() {
 }
 
 async function disconnect() {
+  markClient('hangup_clicked');
   if (room) await room.disconnect();
 }
 

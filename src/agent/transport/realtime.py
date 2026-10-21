@@ -42,6 +42,7 @@ from typing import Any
 from websockets.asyncio.client import connect
 
 from agent.telemetry.logging import get_logger
+from agent.telemetry.metrics import TurnMetrics
 from agent.tools.registry import ToolRegistry
 
 __all__ = ["RealtimeSession", "RealtimeUnavailable"]
@@ -100,6 +101,8 @@ class RealtimeSession:
         sink: Any,
         publish: Callable[[dict[str, Any]], Awaitable[None]],
         ringback: Any = None,
+        timeline: Any = None,
+        call_id: str = "",
     ) -> None:
         self._api_key = api_key
         self._model = model
@@ -109,11 +112,21 @@ class RealtimeSession:
         self._sink = sink
         self._publish = publish
         self._ringback = ringback
+        self._timeline = timeline
+        self._call_id = call_id
 
         self._ws: Any = None
         self._audio_out: asyncio.Queue[bytes | None] = asyncio.Queue()
         self._player: asyncio.Task[None] | None = None
         self._turns = 0
+        # There is no equivalent of the pipeline's TurnRunner here — one event
+        # stream carries every turn, so timing has to be assembled from events
+        # rather than owned by a call that returns when a turn is done. This
+        # was the one path with no per-turn latency number at all; on a
+        # network this fast the setup steps below dominate more than they do
+        # on the pipeline, which is exactly why they needed their own numbers.
+        self._turn_no = 0
+        self._turn_metrics: TurnMetrics | None = None
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
@@ -150,7 +163,9 @@ class RealtimeSession:
         """Hold the call open until the caller's audio stream ends."""
         async with await self._open() as ws:
             self._ws = ws
+            self._mark("realtime_socket_open")
             await self._configure()
+            self._mark("realtime_configured")
 
             # Ring, rather than start playback, until there is something to
             # play. The playback task takes the sink's lock for the whole call,
@@ -231,6 +246,7 @@ class RealtimeSession:
         caller should hear who they have reached before they say anything.
         """
         await asyncio.sleep(_GREETING_SETTLE_S)
+        self._mark("greeting_requested")
         await self._send(
             {
                 "type": "response.create",
@@ -292,9 +308,44 @@ class RealtimeSession:
         """
         if self._player is not None:
             return
+        # Only true the first time this runs: every later delta belongs to a
+        # turn, which _turn_metrics already times.
+        self._mark("greeting_first_audio")
         if self._ringback is not None:
             await self._ringback.stop()
         self._player = asyncio.create_task(self._play())
+
+    def _begin_turn(self) -> None:
+        """The caller has finished speaking — start timing the reply.
+
+        Anchored on ``speech_stopped``, the same choice ``TurnMetrics`` makes
+        on the pipeline path for the same reason: anchoring on the transcript
+        instead would hide however long the model's own transcription took
+        and flatter the number.
+        """
+        self._turn_no += 1
+        self._turn_metrics = TurnMetrics(
+            turn_id=f"turn_{self._turn_no:02d}",
+            call_id=self._call_id,
+            model=self._model,
+            tts_provider="realtime",
+        )
+        self._turn_metrics.mark_speech_end()
+
+    def _finish_turn(self) -> None:
+        """Log the turn now that the agent has finished replying to it.
+
+        A no-op for the greeting, which has no preceding ``speech_stopped``
+        and so never gets a ``_turn_metrics`` to begin with.
+        """
+        if self._turn_metrics is None:
+            return
+        log.info(**self._turn_metrics.as_log())
+        self._turn_metrics = None
+
+    def _mark(self, label: str) -> None:
+        if self._timeline is not None:
+            self._timeline.mark(label)
 
     def _drop_queued_audio(self) -> None:
         while not self._audio_out.empty():
@@ -316,6 +367,8 @@ class RealtimeSession:
             if kind.endswith("audio.delta"):
                 self._audio_out.put_nowait(base64.b64decode(event["delta"]))
                 await self._begin_playback()
+                if self._turn_metrics is not None:
+                    self._turn_metrics.mark_first_audio()
 
             elif kind == "input_audio_buffer.speech_started":
                 # Barge-in. Drop what is queued and silence the line; the
@@ -325,8 +378,22 @@ class RealtimeSession:
                     # A caller talking over the ringing tone has answered it.
                     await self._ringback.stop()
                 await self._sink.stop()
+                if self._turn_metrics is not None and self._turn_metrics.first_audio_at is not None:
+                    # The agent had started answering the previous turn and got
+                    # cut off before output_audio_transcript.done could log it.
+                    # Log what happened rather than losing the turn outright —
+                    # the same reasoning as recording what was SPOKEN after a
+                    # pipeline barge-in, not what was intended.
+                    self._turn_metrics.interrupted = True
+                    log.info(**self._turn_metrics.as_log())
+                    self._turn_metrics = None
+
+            elif kind == "input_audio_buffer.speech_stopped":
+                self._begin_turn()
 
             elif kind.endswith("input_audio_transcription.completed"):
+                if self._turn_metrics is not None:
+                    self._turn_metrics.mark_transcript_final()
                 await self._say("user", event.get("transcript", ""))
 
             elif kind.endswith("output_audio_transcript.done") or kind.endswith(
@@ -334,6 +401,7 @@ class RealtimeSession:
             ):
                 self._turns += 1
                 await self._say("agent", event.get("transcript", ""))
+                self._finish_turn()
 
             elif kind == "response.function_call_arguments.done":
                 await self._call_tool(event)
